@@ -1,0 +1,15 @@
+{{- if .Values.storefront.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-pvc
+  labels:
+    app.kubernetes.io/name: mariadb
+    app.kubernetes.io/part-of: storefront
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storefront.mariadb.storage }}
+{{- end }}

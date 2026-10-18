@@ -1,0 +1,8 @@
+# Production/VPS overrides for urumi-platform (k3s)
+global:
+  environment: vps
+  storageClass: "local-path"
+
+storefront:
+  ingress:
+    host: store.urumi.example.com

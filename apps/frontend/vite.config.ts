@@ -9,13 +9,19 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1',
         changeOrigin: true,
+        headers: {
+          Host: 'store.local',
+        },
       },
       '/mcp': {
-        target: 'http://localhost:5000',
+        target: 'http://127.0.0.1',
         changeOrigin: true,
-      }
-    }
+        headers: {
+          Host: 'store.local',
+        },
+      },
+    },
   }
 })

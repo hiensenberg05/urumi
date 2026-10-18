@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "controller",
+            "livenessProbe": {
+              "httpGet": {
+                "path": "/healthz",
+                "port": 10254,
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 45,
+              "periodSeconds": 10,
+              "timeoutSeconds": 5,
+              "failureThreshold": 5
+            },
+            "readinessProbe": {
+              "httpGet": {
+                "path": "/healthz",
+                "port": 10254,
+                "scheme": "HTTP"
+              },
+              "initialDelaySeconds": 25,
+              "periodSeconds": 10,
+              "timeoutSeconds": 5,
+              "failureThreshold": 5
+            }
+          }
+        ]
+      }
+    }
+  }
+}

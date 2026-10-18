@@ -1,0 +1,149 @@
+global:
+  environment: kind
+  storageClass: "standard"
+
+storefront:
+  enabled: true
+  mariadb:
+    image:
+      repository: mariadb
+      tag: "11.4"
+      pullPolicy: IfNotPresent
+    database: wordpress
+    user: wordpress
+    password: "wp_secure_password_123"
+    rootPassword: "mariadb_root_password_123"
+    storage: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  wordpress:
+    image:
+      repository: wordpress
+      tag: "6.7-php8.2-apache"
+      pullPolicy: IfNotPresent
+    adminUser: admin
+    adminPassword: "AdminPassword123!"
+    adminEmail: "admin@urumi.local"
+    siteTitle: "Urumi WooCommerce Store"
+    siteUrl: "http://store.local"
+    storage: 2Gi
+    resources:
+      requests:
+        cpu: 150m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+  woocommerce:
+    consumerKey: "ck_98fbc18596f264871d8717904e5d61483acfb0a1"
+    consumerSecret: "cs_12cda47b1981cb02720b08051a8bc8f895f3b7d1"
+
+  ingress:
+    enabled: true
+    className: nginx
+    host: store.local
+
+  initJob:
+    enabled: true
+    image:
+      repository: wordpress
+      tag: "cli-2.11"
+      pullPolicy: IfNotPresent
+
+mcpServers:
+  enabled: true
+  woocommerce:
+    enabled: true
+    image:
+      repository: urumi/woocommerce-mcp
+      tag: "v1.0.1"
+      pullPolicy: IfNotPresent
+    port: 8001
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+  inventory:
+    enabled: true
+    image:
+      repository: urumi/inventory-mcp
+      tag: "v1.0.0"
+      pullPolicy: IfNotPresent
+    port: 8002
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+  analytics:
+    enabled: true
+    image:
+      repository: urumi/analytics-mcp
+      tag: "v1.0.0"
+      pullPolicy: IfNotPresent
+    port: 8003
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+
+gateway:
+  enabled: true
+  image:
+    repository: urumi/mcp-gateway
+    tag: "v1.0.2"
+    pullPolicy: IfNotPresent
+  port: 8000
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  rateLimit:
+    perMinute: 60
+    burst: 15
+  ingress:
+    enabled: true
+    className: nginx
+    host: gateway.local
+
+aiService:
+  enabled: true
+  image:
+    repository: urumi/ai-service
+    tag: "v1.0.1"
+    pullPolicy: IfNotPresent
+  port: 8004
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  groq:
+    model: "openai/gpt-oss-120b"
+    fallbackModel: "openai/gpt-oss-20b"
+

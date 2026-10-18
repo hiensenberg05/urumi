@@ -1,0 +1,8 @@
+# Kind-specific overrides for urumi-platform
+global:
+  environment: kind
+  storageClass: "standard"
+
+storefront:
+  ingress:
+    host: store.local

@@ -1,0 +1,26 @@
+{{- if and .Values.storefront.enabled .Values.storefront.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wordpress-ingress
+  labels:
+    app.kubernetes.io/name: wordpress
+    app.kubernetes.io/part-of: storefront
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.storefront.ingress.className | quote }}
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+spec:
+  ingressClassName: {{ .Values.storefront.ingress.className }}
+  rules:
+    - host: {{ .Values.storefront.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress
+                port:
+                  number: 80
+{{- end }}

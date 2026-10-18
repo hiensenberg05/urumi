@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Navbar } from './components/Navbar';
 import { ApiKeyModal } from './components/ApiKeyModal';
@@ -33,6 +33,45 @@ export function App() {
   const [tools, setTools] = useState<ServerTool[]>(MOCK_TOOLS);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(MOCK_AUDIT_LOGS);
   const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>(MOCK_API_KEYS);
+
+  const activeApiKey = currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'support-key-urumi-2026';
+
+  const fetchLivePlatformState = async () => {
+    try {
+      const headers = { 'X-API-Key': activeApiKey };
+      const [serversRes, toolsRes, logsRes, keysRes] = await Promise.all([
+        fetch('/api/v1/servers', { headers }),
+        fetch(`/api/v1/tools?role=${currentUser.role === 'ADMIN' ? 'admin' : 'support_rep'}`, { headers }),
+        fetch('/api/v1/audit-logs', { headers }),
+        fetch('/api/v1/api-keys', { headers }),
+      ]);
+
+      if (serversRes.ok) {
+        const s = await serversRes.json();
+        if (Array.isArray(s) && s.length > 0) setServers(s);
+      }
+      if (toolsRes.ok) {
+        const t = await toolsRes.json();
+        if (Array.isArray(t) && t.length > 0) setTools(t);
+      }
+      if (logsRes.ok) {
+        const l = await logsRes.json();
+        if (Array.isArray(l) && l.length > 0) setAuditLogs(l);
+      }
+      if (keysRes.ok) {
+        const k = await keysRes.json();
+        if (Array.isArray(k) && k.length > 0) setApiKeys(k);
+      }
+    } catch (e) {
+      // Graceful fallback to initial mock state if gateway warming up
+    }
+  };
+
+  useEffect(() => {
+    fetchLivePlatformState();
+    const interval = setInterval(fetchLivePlatformState, 4000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   // Modals and Drawers
   const [selectedTraceLog, setSelectedTraceLog] = useState<AuditLogItem | null>(null);
