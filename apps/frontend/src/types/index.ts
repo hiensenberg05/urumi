@@ -1,0 +1,116 @@
+export type UserRole = 'ADMIN' | 'MEMBER';
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  avatarUrl: string;
+}
+
+export type ServerStatus = 'Connected' | 'Unreachable' | 'Disabled';
+
+export interface McpServer {
+  id: string;
+  name: string;
+  tag: string;
+  endpointUrl: string;
+  status: ServerStatus;
+  transport: string;
+  pingMs: number;
+  uptimePct: number;
+  toolsCount: number;
+  discoveredTools: string[];
+  lastChecked: string;
+  authType: string;
+}
+
+export type RiskProfile = 
+  | 'Low (Read-only)'
+  | 'Medium (Customer PII)'
+  | 'High (Write Mutation)'
+  | 'Critical (Financial Impact)'
+  | 'Medium (Session lock)'
+  | 'High (Operational write)'
+  | 'Critical (Stock Discrepancy)'
+  | 'Medium (Read Aggregate)';
+
+export type PolicyAssignment = 'ALLOW' | 'DENY' | 'INHERIT';
+
+export interface ServerTool {
+  id: string;
+  namespacedName: string;
+  originalName: string;
+  serverId: string;
+  serverName: string;
+  description: string;
+  riskProfile: RiskProfile;
+  rateLimit: string;
+  policy: PolicyAssignment;
+  effectiveRule: string;
+  schema?: Record<string, any>;
+  isAllowed: boolean;
+}
+
+export interface AuditLogItem {
+  id: string;
+  correlationId: string;
+  timestamp: string;
+  timeAgo: string;
+  principal: string;
+  userRole: UserRole;
+  avatarUrl?: string;
+  clientAgent: string;
+  clientIp: string;
+  targetServer: string;
+  toolName: string;
+  durationMs: number;
+  status: '200 OK' | '403 Blocked' | '504 Timeout' | '500 Error';
+  lifecycle?: {
+    ingressAuthMs: number;
+    policyEvalMs: number;
+    policyRuleDetail?: string;
+    upstreamStatus: 'Dispatched' | 'Skipped' | 'Timed Out';
+  };
+  sanitizedParams?: Record<string, any>;
+}
+
+export interface ToolExecutionStep {
+  stepNumber: number;
+  server: string;
+  tool: string;
+  args: Record<string, any>;
+  result: Record<string, any>;
+  status: '200 OK' | '403 Blocked' | 'Error';
+  durationMs: number;
+  summaryNote?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  senderName?: string;
+  model?: string;
+  steps?: ToolExecutionStep[];
+}
+
+export interface ApiKeyItem {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scope: string;
+  role: UserRole;
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  isRevoked: boolean;
+}
+
+export interface ClientSession {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  isLive: boolean;
+}
