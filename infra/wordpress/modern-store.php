@@ -2,10 +2,10 @@
 /**
  * Plugin Name: Modern Storefront Enhancer
  * Description: High-end, realistic styling for the Urumi E-Commerce Storefront
- * Version: 1.1.0
+ * Version: 1.2.0
  */
 
-// 1. Inject Modern Typography & Global Styles
+// 1. Inject Modern Typography & Global Styles into HEAD
 add_action('wp_head', function() {
     ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -245,62 +245,26 @@ add_action('wp_head', function() {
             display: block !important;
         }
 
-        /* Buttons (Add to Cart, Checkout, Place Order) */
-        ul.products li.product .button,
-        .woocommerce #respond input#submit.alt, 
-        .woocommerce a.button.alt, 
-        .woocommerce button.button.alt, 
-        .woocommerce input.button.alt,
-        .woocommerce .cart .button,
-        .woocommerce-page .cart .button,
-        .wc-block-components-checkout-place-order-button,
-        .wc-block-components-button,
-        .wc-block-checkout__actions button,
-        #place_order,
-        button.wc-block-components-checkout-place-order-button,
-        .wp-block-woocommerce-checkout-order-summary-block button,
-        .wc-block-components-checkout-step--with-step-number .wc-block-components-button {
+        /* Default Shop Buttons */
+        ul.products li.product .button {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
             color: #ffffff !important;
             border-radius: 10px !important;
-            padding: 16px 28px !important;
-            font-weight: 800 !important;
-            font-size: 16px !important;
+            padding: 12px 18px !important;
+            font-weight: 700 !important;
+            font-size: 13.5px !important;
             border: none !important;
-            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.25) !important;
             transition: all 0.2s ease !important;
             text-align: center !important;
             display: block !important;
             width: 100% !important;
-            cursor: pointer !important;
-            opacity: 1 !important;
-            visibility: visible !important;
         }
 
-        /* Ensure inner text is bright white */
-        .wc-block-components-checkout-place-order-button span,
-        .wc-block-components-button span {
-            color: #ffffff !important;
-            font-weight: 800 !important;
-        }
-
-        ul.products li.product .button:hover,
-        .woocommerce #respond input#submit.alt:hover, 
-        .woocommerce a.button.alt:hover, 
-        .woocommerce button.button.alt:hover, 
-        .woocommerce input.button.alt:hover,
-        .wc-block-components-checkout-place-order-button:hover,
-        .wc-block-components-button:hover,
-        .wc-block-checkout__actions button:hover,
-        #place_order:hover {
+        ul.products li.product .button:hover {
             background: #047857 !important;
-            box-shadow: 0 6px 18px rgba(16, 185, 129, 0.5) !important;
-            transform: translateY(-2px) !important;
-            color: #ffffff !important;
-        }
-
-        .wc-block-checkout__actions {
-            margin-top: 24px !important;
+            box-shadow: 0 6px 12px rgba(16, 185, 129, 0.35) !important;
+            transform: translateY(-1px);
         }
 
         /* Cart & Checkout Styling */
@@ -355,6 +319,12 @@ add_action('wp_head', function() {
             font-size: 13px !important;
         }
     </style>
+    <?php
+});
+
+// 2. Render Top Announcement Banner at top of page body
+add_action('storefront_before_header', function() {
+    ?>
     <div id="urumi-top-banner">
         <span class="badge">Kubernetes v1.28</span>
         <span>🚀 <strong>Urumi Autonomous Hardware Store</strong> — Live MCP Gateway Enabled & Synchronized</span>
@@ -362,7 +332,69 @@ add_action('wp_head', function() {
     <?php
 });
 
-// 2. Add Sleek Hero Section on the Shop Catalog
+// 3. Inject High-Priority Checkout & Place Order Styles in Footer
+add_action('wp_footer', function() {
+    ?>
+    <style>
+        /* Force Checkout Action & Place Order Button Visibility */
+        .wc-block-checkout__actions,
+        .wc-block-checkout__actions_row,
+        .wc-block-components-checkout-place-order-button-wrapper {
+            display: block !important;
+            visibility: visible !important;
+            margin-top: 25px !important;
+            padding: 15px 0 !important;
+            clear: both !important;
+        }
+
+        .wc-block-components-checkout-place-order-button,
+        .wc-block-checkout__actions button,
+        button.wc-block-components-checkout-place-order-button,
+        .wc-block-components-button,
+        #place_order,
+        button#place_order,
+        .woocommerce-checkout button[type="submit"] {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+            background-color: #10b981 !important;
+            color: #ffffff !important;
+            min-height: 54px !important;
+            height: auto !important;
+            font-size: 17px !important;
+            font-weight: 800 !important;
+            border-radius: 10px !important;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.45) !important;
+            display: block !important;
+            width: 100% !important;
+            cursor: pointer !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+            text-align: center !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            border: none !important;
+        }
+
+        .wc-block-components-checkout-place-order-button span,
+        .wc-block-components-button span {
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            font-size: 17px !important;
+            visibility: visible !important;
+        }
+
+        .wc-block-components-checkout-place-order-button:hover,
+        #place_order:hover {
+            background: #047857 !important;
+            background-color: #047857 !important;
+            color: #ffffff !important;
+            box-shadow: 0 6px 18px rgba(16, 185, 129, 0.55) !important;
+            transform: translateY(-2px) !important;
+        }
+    </style>
+    <?php
+});
+
+// 4. Add Sleek Hero Section on the Shop Catalog
 add_action('woocommerce_before_shop_loop', function() {
     ?>
     <div class="urumi-hero-card">
@@ -389,7 +421,7 @@ add_action('woocommerce_before_shop_loop', function() {
     <?php
 }, 5);
 
-// 3. Customize Storefront Footer Credits
+// 5. Customize Storefront Footer Credits
 add_filter('storefront_credit_link', '__return_false');
 add_action('storefront_footer', function() {
     ?>
