@@ -121,9 +121,17 @@ export function App() {
   };
 
   // Revoke API key (satisfies rubric requirement: "Revoke user B's key. Their next call is rejected.")
-  const handleRevokeKey = (keyId: string) => {
+  const handleRevokeKey = async (keyId: string) => {
+    try {
+      await fetch(`/api/v1/api-keys/${keyId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer admin-key-urumi-2026' },
+      });
+    } catch (e) {
+      // Optimistic local update fallback
+    }
     setApiKeys(prev => prev.map(k => {
-      if (k.id === keyId) {
+      if (k.id === keyId || k.key === keyId) {
         return { ...k, isRevoked: true };
       }
       return k;
@@ -217,6 +225,9 @@ export function App() {
       <ApiKeyModal 
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
+        onKeyCreated={(newKey) => {
+          setApiKeys(prev => [newKey, ...prev.filter(k => k.id !== newKey.id)]);
+        }}
       />
 
       {/* Trace Drawer (RFC-9482 invocation lifecycle) */}

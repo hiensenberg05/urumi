@@ -99,6 +99,7 @@ export interface ChatMessage {
 export interface ApiKeyItem {
   id: string;
   name: string;
+  key?: string;
   keyPrefix: string;
   scope: string;
   role: UserRole;
