@@ -20,10 +20,15 @@ add_action('wp_head', function() {
             --card-border: #e2e8f0;
         }
 
-        body, button, input, select, textarea {
+        body {
             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
             color: #1e293b;
             background-color: #f8fafc !important;
+        }
+
+        button, input, select, textarea {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            color: #1e293b;
         }
 
         /* Top Announcement Bar */
@@ -240,36 +245,62 @@ add_action('wp_head', function() {
             display: block !important;
         }
 
-        /* Buttons (Add to Cart, Checkout) */
+        /* Buttons (Add to Cart, Checkout, Place Order) */
         ul.products li.product .button,
         .woocommerce #respond input#submit.alt, 
         .woocommerce a.button.alt, 
         .woocommerce button.button.alt, 
         .woocommerce input.button.alt,
         .woocommerce .cart .button,
-        .woocommerce-page .cart .button {
+        .woocommerce-page .cart .button,
+        .wc-block-components-checkout-place-order-button,
+        .wc-block-components-button,
+        .wc-block-checkout__actions button,
+        #place_order,
+        button.wc-block-components-checkout-place-order-button,
+        .wp-block-woocommerce-checkout-order-summary-block button,
+        .wc-block-components-checkout-step--with-step-number .wc-block-components-button {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
             color: #ffffff !important;
             border-radius: 10px !important;
-            padding: 11px 18px !important;
-            font-weight: 700 !important;
-            font-size: 13.5px !important;
+            padding: 16px 28px !important;
+            font-weight: 800 !important;
+            font-size: 16px !important;
             border: none !important;
-            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.25) !important;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
             transition: all 0.2s ease !important;
             text-align: center !important;
             display: block !important;
             width: 100% !important;
+            cursor: pointer !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+
+        /* Ensure inner text is bright white */
+        .wc-block-components-checkout-place-order-button span,
+        .wc-block-components-button span {
+            color: #ffffff !important;
+            font-weight: 800 !important;
         }
 
         ul.products li.product .button:hover,
         .woocommerce #respond input#submit.alt:hover, 
         .woocommerce a.button.alt:hover, 
         .woocommerce button.button.alt:hover, 
-        .woocommerce input.button.alt:hover {
+        .woocommerce input.button.alt:hover,
+        .wc-block-components-checkout-place-order-button:hover,
+        .wc-block-components-button:hover,
+        .wc-block-checkout__actions button:hover,
+        #place_order:hover {
             background: #047857 !important;
-            box-shadow: 0 6px 12px rgba(16, 185, 129, 0.35) !important;
-            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(16, 185, 129, 0.5) !important;
+            transform: translateY(-2px) !important;
+            color: #ffffff !important;
+        }
+
+        .wc-block-checkout__actions {
+            margin-top: 24px !important;
         }
 
         /* Cart & Checkout Styling */
