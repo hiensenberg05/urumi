@@ -28,6 +28,7 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         "inventory__list_low_stock",
         "inventory__update_stock",
         "woocommerce__list_products",
+        "woocommerce__list_orders",
     },
     ROLE_ANALYST: {
         "analytics__get_daily_sales",

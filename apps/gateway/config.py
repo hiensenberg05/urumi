@@ -27,8 +27,8 @@ class GatewaySettings(BaseSettings):
     )
 
     # Rate Limiting
-    rate_limit_per_minute: int = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60"))
-    rate_limit_burst: int = int(os.environ.get("RATE_LIMIT_BURST", "15"))
+    rate_limit_per_minute: int = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "300"))
+    rate_limit_burst: int = int(os.environ.get("RATE_LIMIT_BURST", "60"))
 
     # Default Seeded API Keys with Preassigned Roles
     default_api_keys: Dict[str, Dict[str, str]] = {
@@ -39,6 +39,11 @@ class GatewaySettings(BaseSettings):
         },
         "inv-key-urumi-2026": {
             "name": "Inventory Manager Key",
+            "role": "inventory_manager",
+            "scope": "read:write:inventory",
+        },
+        "inv-key-93364b17f221": {
+            "name": "User B Generated Key",
             "role": "inventory_manager",
             "scope": "read:write:inventory",
         },
