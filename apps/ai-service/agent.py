@@ -43,8 +43,45 @@ TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "type": "integer",
                 "description": "New total quantity on hand",
             },
+            "expected_previous_quantity": {
+                "type": "integer",
+                "description": "Optional optimistic concurrency check. Rejects if current stock does not match.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Audit trail reason for the stock change",
+            },
         },
         "required": ["sku", "quantity"],
+    },
+    "inventory__adjust_stock": {
+        "type": "object",
+        "properties": {
+            "sku": {
+                "type": "string",
+                "description": "Product SKU identifier, e.g. SKU-1001",
+            },
+            "delta": {
+                "type": "integer",
+                "description": "Relative delta stock adjustment, e.g. +5 or -20",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Audit trail reason for adjustment (e.g. 'Customer return', 'Damaged goods')",
+            },
+        },
+        "required": ["sku", "delta"],
+    },
+    "inventory__batch_check_stock": {
+        "type": "object",
+        "properties": {
+            "skus": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of SKU codes to check, e.g. ['SKU-1001', 'SKU-1002']",
+            }
+        },
+        "required": ["skus"],
     },
     "woocommerce__list_products": {
         "type": "object",
@@ -214,7 +251,7 @@ class AgentRunner:
         return headers
 
     async def _fetch_tools(self, api_key: str) -> List[Dict[str, Any]]:
-        """Query the Gateway for permitted tools for the authenticated principal."""
+        """Query the Gateway for all available tools across registered upstream MCP servers."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as http:
                 resp = await http.get(
@@ -222,8 +259,7 @@ class AgentRunner:
                     headers=self._gateway_headers(api_key),
                 )
                 if resp.status_code == 200:
-                    tools_data = resp.json()
-                    return [t for t in tools_data if t.get("isAllowed", True)]
+                    return resp.json()
         except Exception as e:
             print(f"[AgentRunner] Warning: tool discovery warning: {e}")
         return []
@@ -309,7 +345,7 @@ class AgentRunner:
 
         # 2. Tool Discovery from Gateway
         raw_tools = await self._fetch_tools(api_key=api_key)
-        allowed_tool_names = [t["namespacedName"] for t in raw_tools]
+        allowed_tool_names = [t["namespacedName"] for t in raw_tools if t.get("isAllowed", True)]
         groq_tools = self._convert_to_groq_tools(raw_tools)
 
         # 3. System Prompt Construction

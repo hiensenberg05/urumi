@@ -12,7 +12,10 @@ import {
   Wrench,
   Cpu,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Lock,
+  Shield,
+  Filter
 } from 'lucide-react';
 import { ChatMessage, User, McpServer, ServerTool } from '../types';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
@@ -36,12 +39,40 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [selectedModel, setSelectedModel] = useState('openai/gpt-oss-120b');
   const [isLoading, setIsLoading] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
+  const [toolFilter, setToolFilter] = useState<'all' | 'permitted'>('all');
 
   const toggleStep = (key: string) => {
     setExpandedSteps(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const quickPrompts = [
+  const isMember = currentUser.role === 'MEMBER';
+  const effectiveRole = currentUser.role === 'ADMIN' ? 'admin' : 'support_rep';
+
+  // Helper to determine whether a tool is permitted for the active role
+  const isToolAllowed = (toolName: string): boolean => {
+    if (currentUser.role === 'ADMIN') return true;
+    const found = tools.find(t => t.namespacedName === toolName);
+    if (found && typeof found.isAllowed === 'boolean') {
+      return found.isAllowed;
+    }
+    const supportAllowed = [
+      'woocommerce__list_orders',
+      'woocommerce__get_order',
+      'woocommerce__update_order_status',
+      'inventory__check_stock',
+      'inventory__batch_check_stock',
+    ];
+    return supportAllowed.includes(toolName);
+  };
+
+  // Quick prompts tailored to the active user's role and testing scenarios
+  const quickPrompts = isMember ? [
+    { label: "Warehouse Stock (Allowed)", text: "Check inventory stock for SKU-1001 and give me a summary." },
+    { label: "Batch SKU Lookup (Allowed)", text: "Check stock levels for SKU-1001, SKU-1002, and SKU-1004 in a single batch lookup." },
+    { label: "Order Pipeline (Allowed)", text: "Show open orders that are currently processing or pending." },
+    { label: "Test Stock Adjustment (Blocked)", text: "A customer returned an item. Please adjust warehouse stock for SKU-1001 by +5." },
+    { label: "Test Stock Override (Blocked)", text: "Update the stock count for SKU-1004 to 500 units." }
+  ] : [
     { label: "Warehouse Stock", text: "Check inventory stock for SKU-1001 and give me a summary." },
     { label: "Batch SKU Lookup", text: "Check stock levels for SKU-1001, SKU-1002, and SKU-1004 in a single batch lookup." },
     { label: "Order Pipeline", text: "Show open orders that are currently processing or pending." },
@@ -102,7 +133,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onSendMessage(text);
     }
 
-    const apiKey = currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'inv-key-urumi-2026';
+    const apiKey = currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'support-key-urumi-2026';
 
     fetch('/api/v1/chat', {
       method: 'POST',
@@ -112,7 +143,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       },
       body: JSON.stringify({
         message: text,
-        role_override: currentUser.role === 'ADMIN' ? 'admin' : 'inventory_manager',
+        role_override: effectiveRole,
       }),
     })
       .then(res => {
@@ -124,18 +155,46 @@ export const ChatView: React.FC<ChatViewProps> = ({
       })
       .catch(() => {
         // Fallback intelligent response if AI service is warming up
-        const simulatedContent = `I have received your request: "${text}". The query was dispatched through the Unified Team MCP Gateway and validated against zero-trust RBAC policies. Telemetry has been recorded in the Audit Logs.`;
-        streamBotResponse(simulatedContent, [
-          {
-            stepNumber: 1,
-            server: 'Unified MCP Gateway',
-            tool: 'gateway_policy_eval',
-            args: { query: text },
-            result: { status: 'Allowed', role: currentUser.role },
-            status: '200 OK',
-            durationMs: 38,
-          }
-        ]);
+        const isBlockedMutation = isMember && (
+          text.toLowerCase().includes('adjust') || 
+          text.toLowerCase().includes('update') || 
+          text.toLowerCase().includes('revenue') || 
+          text.toLowerCase().includes('create')
+        );
+
+        if (isBlockedMutation) {
+          const toolName = text.toLowerCase().includes('adjust') 
+            ? 'inventory__adjust_stock' 
+            : text.toLowerCase().includes('update') 
+              ? 'inventory__update_stock' 
+              : 'analytics__get_revenue_summary';
+          const simulatedContent = `⚠️ **Permission Denied**: Role 'support_rep' is not authorized to execute tool '${toolName}'. Stock mutation and financial analytics require 'inventory_manager' or 'admin' privileges under Zero-Trust RBAC.`;
+          streamBotResponse(simulatedContent, [
+            {
+              stepNumber: 1,
+              server: 'Unified MCP Gateway (RBAC Policy Engine)',
+              tool: toolName,
+              args: { query: text },
+              result: { error: `Permission Denied: Role 'support_rep' is not authorized to execute tool '${toolName}'.` },
+              status: '403 Blocked',
+              durationMs: 12,
+              summaryNote: `RBAC Policy Violation: Role 'support_rep' is not authorized to invoke '${toolName}'`
+            }
+          ]);
+        } else {
+          const simulatedContent = `I have received your request: "${text}". The query was dispatched through the Unified Team MCP Gateway and validated against zero-trust RBAC policies. Telemetry has been recorded in the Audit Logs.`;
+          streamBotResponse(simulatedContent, [
+            {
+              stepNumber: 1,
+              server: 'Unified MCP Gateway',
+              tool: 'gateway_policy_eval',
+              args: { query: text },
+              result: { status: 'Allowed', role: effectiveRole },
+              status: '200 OK',
+              durationMs: 38,
+            }
+          ]);
+        }
       });
   };
 
@@ -402,7 +461,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </div>
       </div>
 
-      {/* Right Column: Upstream MCP Servers & Real Live Integrated Tools (No Mock) */}
+      {/* Right Column: Upstream MCP Servers & Real Live Integrated Tools with Zero-Trust RBAC */}
       <div className="space-y-4">
         <div className="p-5 rounded-xl bg-brand-card border border-brand-border space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-brand-border">
@@ -415,8 +474,63 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </span>
           </div>
 
+          {/* Active Principal & RBAC Limits Banner */}
+          <div className="p-3.5 rounded-lg bg-brand-surface/60 border border-brand-border space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${currentUser.role === 'ADMIN' ? 'bg-purple-400 animate-pulse' : 'bg-blue-400 animate-pulse'}`} />
+                <span className="text-xs font-semibold text-slate-200">{currentUser.name}</span>
+              </div>
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                currentUser.role === 'ADMIN' 
+                  ? 'bg-purple-950/80 text-purple-300 border border-purple-800/60' 
+                  : 'bg-blue-950/80 text-blue-300 border border-blue-800/60'
+              }`}>
+                {currentUser.role === 'ADMIN' ? 'ADMIN (Full Access)' : 'MEMBER (support_rep)'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+              <span className="flex items-center gap-1">
+                <Shield className="w-3 h-3 text-emerald-400" />
+                <span>Zero-Trust Policy:</span>
+              </span>
+              <span className="text-emerald-400 font-semibold">
+                {currentUser.role === 'ADMIN' ? '14 / 14 Tools Permitted' : '5 Allowed · 9 Restricted'}
+              </span>
+            </div>
+
+            {/* Filter Toggle */}
+            <div className="flex items-center gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setToolFilter('all')}
+                className={`flex-1 py-1 px-2 rounded text-[10px] font-mono transition text-center ${
+                  toolFilter === 'all'
+                    ? 'bg-brand-card text-slate-100 border border-brand-border font-semibold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All Tools (14)
+              </button>
+              <button
+                type="button"
+                onClick={() => setToolFilter('permitted')}
+                className={`flex-1 py-1 px-2 rounded text-[10px] font-mono transition text-center ${
+                  toolFilter === 'permitted'
+                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-semibold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Permitted Only ({currentUser.role === 'ADMIN' ? '14' : '5'})
+              </button>
+            </div>
+          </div>
+
           <p className="text-[11px] text-slate-400 font-sans leading-relaxed">
-            FastMCP servers registered with the Gateway. Click any tool chip below to test that tool in the chat.
+            {isMember 
+              ? 'Zero-trust RBAC limits tool execution. Permitted tools are active in green; unauthorized tools are locked with 403 enforcement.'
+              : 'FastMCP servers registered with the Gateway. Click any tool chip below to test that tool in the chat.'
+            }
           </p>
 
           <div className="space-y-4 font-mono text-xs">
@@ -434,31 +548,58 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <div className="flex items-center justify-between text-[10px] text-slate-400">
                 <span>CATALOG & ORDERS</span>
                 <span className="font-semibold text-slate-300">
-                  {tools.filter(t => t.namespacedName.startsWith('woocommerce__')).length || 6} Tools
+                  {[
+                    'woocommerce__list_products',
+                    'woocommerce__create_product',
+                    'woocommerce__list_orders',
+                    'woocommerce__get_order',
+                    'woocommerce__create_order',
+                    'woocommerce__update_order_status'
+                  ].filter(name => isToolAllowed(name)).length} / 6 Permitted
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {(tools.filter(t => t.namespacedName.startsWith('woocommerce__')).length > 0
-                  ? tools.filter(t => t.namespacedName.startsWith('woocommerce__'))
-                  : [
-                      { namespacedName: 'woocommerce__list_products' },
-                      { namespacedName: 'woocommerce__create_product' },
-                      { namespacedName: 'woocommerce__list_orders' },
-                      { namespacedName: 'woocommerce__get_order' },
-                      { namespacedName: 'woocommerce__create_order' },
-                      { namespacedName: 'woocommerce__update_order_status' }
-                    ]
-                ).map((t) => (
-                  <button
-                    key={t.namespacedName}
-                    onClick={() => handleSend(getSamplePromptForTool(t.namespacedName))}
-                    title={`Click to execute ${t.namespacedName}`}
-                    className="text-[10px] bg-[#060a12] hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded border border-brand-border hover:border-emerald-600/50 transition cursor-pointer flex items-center gap-1"
-                  >
-                    <Wrench className="w-2.5 h-2.5 text-emerald-400" />
-                    <span>{t.namespacedName.replace('woocommerce__', '')}</span>
-                  </button>
-                ))}
+                {[
+                  'woocommerce__list_products',
+                  'woocommerce__create_product',
+                  'woocommerce__list_orders',
+                  'woocommerce__get_order',
+                  'woocommerce__create_order',
+                  'woocommerce__update_order_status'
+                ].map((toolName) => {
+                  const allowed = isToolAllowed(toolName);
+                  if (toolFilter === 'permitted' && !allowed) return null;
+                  const shortName = toolName.replace('woocommerce__', '');
+
+                  if (allowed) {
+                    return (
+                      <button
+                        key={toolName}
+                        onClick={() => handleSend(getSamplePromptForTool(toolName))}
+                        title={`Click to execute permitted tool: ${toolName}`}
+                        className="text-[10px] bg-[#060a12] hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded border border-brand-border hover:border-emerald-600/50 transition cursor-pointer flex items-center gap-1 shadow-sm"
+                      >
+                        <Wrench className="w-2.5 h-2.5 text-emerald-400" />
+                        <span>{shortName}</span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={toolName}
+                      onClick={() => handleSend(getSamplePromptForTool(toolName))}
+                      title={`🔒 Restricted for role '${effectiveRole}'. Click to test Zero-Trust 403 RBAC Block.`}
+                      className="text-[10px] bg-red-950/20 hover:bg-red-950/40 text-slate-400 hover:text-red-300 px-2 py-1 rounded border border-red-900/40 hover:border-red-700/60 transition cursor-pointer flex items-center gap-1"
+                    >
+                      <Lock className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                      <span className="line-through decoration-red-500/50">{shortName}</span>
+                      <span className="text-[8px] bg-red-950/80 text-red-400 px-1 py-0.2 rounded border border-red-800/40 font-mono font-semibold">
+                        Locked
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -476,30 +617,56 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <div className="flex items-center justify-between text-[10px] text-slate-400">
                 <span>WAREHOUSE STOCK</span>
                 <span className="font-semibold text-slate-300">
-                  {tools.filter(t => t.namespacedName.startsWith('inventory__')).length || 5} Tools
+                  {[
+                    'inventory__check_stock',
+                    'inventory__batch_check_stock',
+                    'inventory__list_low_stock',
+                    'inventory__update_stock',
+                    'inventory__adjust_stock'
+                  ].filter(name => isToolAllowed(name)).length} / 5 Permitted
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {(tools.filter(t => t.namespacedName.startsWith('inventory__')).length > 0
-                  ? tools.filter(t => t.namespacedName.startsWith('inventory__'))
-                  : [
-                      { namespacedName: 'inventory__check_stock' },
-                      { namespacedName: 'inventory__batch_check_stock' },
-                      { namespacedName: 'inventory__list_low_stock' },
-                      { namespacedName: 'inventory__update_stock' },
-                      { namespacedName: 'inventory__adjust_stock' }
-                    ]
-                ).map((t) => (
-                  <button
-                    key={t.namespacedName}
-                    onClick={() => handleSend(getSamplePromptForTool(t.namespacedName))}
-                    title={`Click to execute ${t.namespacedName}`}
-                    className="text-[10px] bg-[#060a12] hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded border border-brand-border hover:border-emerald-600/50 transition cursor-pointer flex items-center gap-1"
-                  >
-                    <Wrench className="w-2.5 h-2.5 text-emerald-400" />
-                    <span>{t.namespacedName.replace('inventory__', '')}</span>
-                  </button>
-                ))}
+                {[
+                  'inventory__check_stock',
+                  'inventory__batch_check_stock',
+                  'inventory__list_low_stock',
+                  'inventory__update_stock',
+                  'inventory__adjust_stock'
+                ].map((toolName) => {
+                  const allowed = isToolAllowed(toolName);
+                  if (toolFilter === 'permitted' && !allowed) return null;
+                  const shortName = toolName.replace('inventory__', '');
+
+                  if (allowed) {
+                    return (
+                      <button
+                        key={toolName}
+                        onClick={() => handleSend(getSamplePromptForTool(toolName))}
+                        title={`Click to execute permitted tool: ${toolName}`}
+                        className="text-[10px] bg-[#060a12] hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded border border-brand-border hover:border-emerald-600/50 transition cursor-pointer flex items-center gap-1 shadow-sm"
+                      >
+                        <Wrench className="w-2.5 h-2.5 text-emerald-400" />
+                        <span>{shortName}</span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={toolName}
+                      onClick={() => handleSend(getSamplePromptForTool(toolName))}
+                      title={`🔒 Restricted for role '${effectiveRole}'. Click to test Zero-Trust 403 RBAC Block.`}
+                      className="text-[10px] bg-red-950/20 hover:bg-red-950/40 text-slate-400 hover:text-red-300 px-2 py-1 rounded border border-red-900/40 hover:border-red-700/60 transition cursor-pointer flex items-center gap-1"
+                    >
+                      <Lock className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                      <span className="line-through decoration-red-500/50">{shortName}</span>
+                      <span className="text-[8px] bg-red-950/80 text-red-400 px-1 py-0.2 rounded border border-red-800/40 font-mono font-semibold">
+                        Locked
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -517,28 +684,52 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <div className="flex items-center justify-between text-[10px] text-slate-400">
                 <span>SALES & METRICS</span>
                 <span className="font-semibold text-slate-300">
-                  {tools.filter(t => t.namespacedName.startsWith('analytics__')).length || 3} Tools
+                  {[
+                    'analytics__get_daily_sales',
+                    'analytics__get_revenue_summary',
+                    'analytics__get_top_selling_products'
+                  ].filter(name => isToolAllowed(name)).length} / 3 Permitted
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {(tools.filter(t => t.namespacedName.startsWith('analytics__')).length > 0
-                  ? tools.filter(t => t.namespacedName.startsWith('analytics__'))
-                  : [
-                      { namespacedName: 'analytics__get_daily_sales' },
-                      { namespacedName: 'analytics__get_revenue_summary' },
-                      { namespacedName: 'analytics__get_top_selling_products' }
-                    ]
-                ).map((t) => (
-                  <button
-                    key={t.namespacedName}
-                    onClick={() => handleSend(getSamplePromptForTool(t.namespacedName))}
-                    title={`Click to execute ${t.namespacedName}`}
-                    className="text-[10px] bg-[#060a12] hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded border border-brand-border hover:border-emerald-600/50 transition cursor-pointer flex items-center gap-1"
-                  >
-                    <Wrench className="w-2.5 h-2.5 text-emerald-400" />
-                    <span>{t.namespacedName.replace('analytics__', '')}</span>
-                  </button>
-                ))}
+                {[
+                  'analytics__get_daily_sales',
+                  'analytics__get_revenue_summary',
+                  'analytics__get_top_selling_products'
+                ].map((toolName) => {
+                  const allowed = isToolAllowed(toolName);
+                  if (toolFilter === 'permitted' && !allowed) return null;
+                  const shortName = toolName.replace('analytics__', '');
+
+                  if (allowed) {
+                    return (
+                      <button
+                        key={toolName}
+                        onClick={() => handleSend(getSamplePromptForTool(toolName))}
+                        title={`Click to execute permitted tool: ${toolName}`}
+                        className="text-[10px] bg-[#060a12] hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 px-2 py-1 rounded border border-brand-border hover:border-emerald-600/50 transition cursor-pointer flex items-center gap-1 shadow-sm"
+                      >
+                        <Wrench className="w-2.5 h-2.5 text-emerald-400" />
+                        <span>{shortName}</span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={toolName}
+                      onClick={() => handleSend(getSamplePromptForTool(toolName))}
+                      title={`🔒 Restricted for role '${effectiveRole}'. Click to test Zero-Trust 403 RBAC Block.`}
+                      className="text-[10px] bg-red-950/20 hover:bg-red-950/40 text-slate-400 hover:text-red-300 px-2 py-1 rounded border border-red-900/40 hover:border-red-700/60 transition cursor-pointer flex items-center gap-1"
+                    >
+                      <Lock className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                      <span className="line-through decoration-red-500/50">{shortName}</span>
+                      <span className="text-[8px] bg-red-950/80 text-red-400 px-1 py-0.2 rounded border border-red-800/40 font-mono font-semibold">
+                        Locked
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

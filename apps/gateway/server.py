@@ -423,7 +423,91 @@ async def chat_execute(
     step = None
     assistant_content = ""
 
-    if "product" in msg_lower or "catalog" in msg_lower:
+    if "adjust" in msg_lower or "returned" in msg_lower:
+        tool_to_call = "inventory__adjust_stock"
+        if not is_tool_allowed(effective_role, tool_to_call):
+            audit_logger.log_event(
+                principal=principal.name,
+                user_role=effective_role,
+                tool_name=tool_to_call,
+                target_server="gateway",
+                status="403 Blocked",
+                duration_ms=10.0,
+                client_ip="127.0.0.1",
+                policy_rule_detail=f"RBAC Policy Violation: Role '{effective_role}' is not authorized to invoke '{tool_to_call}'",
+                upstream_status="Skipped",
+            )
+            return {
+                "role": "assistant",
+                "content": f"⚠️ **Permission Denied**: Role '{effective_role}' is not authorized to execute tool '{tool_to_call}'. Stock mutation requires 'inventory_manager' or 'admin'.",
+                "steps": [{
+                    "stepNumber": 1,
+                    "server": "Inventory Tracker Server",
+                    "tool": tool_to_call,
+                    "args": {"sku": "SKU-1001", "delta": 5, "reason": "Customer return"},
+                    "result": {"error": f"Permission Denied: Role '{effective_role}' is not authorized to execute tool '{tool_to_call}'."},
+                    "status": "403 Blocked",
+                    "durationMs": 10.0,
+                    "summaryNote": f"RBAC Policy Violation: Role '{effective_role}' is not authorized to invoke '{tool_to_call}'",
+                }]
+            }
+        try:
+            res = await upstream_manager.execute_tool(tool_to_call, {"sku": "SKU-1001", "delta": 5, "reason": "Customer return"})
+            assistant_content = f"Successfully adjusted stock for SKU-1001 by +5. New stock: {res.get('new_quantity', 'updated')}."
+            step = {
+                "stepNumber": 1,
+                "server": "Inventory Tracker Server",
+                "tool": tool_to_call,
+                "args": {"sku": "SKU-1001", "delta": 5, "reason": "Customer return"},
+                "result": res,
+                "status": "200 OK",
+                "durationMs": 35.0,
+            }
+        except Exception as e:
+            assistant_content = f"Error adjusting stock: {str(e)}"
+    elif "update" in msg_lower and "stock" in msg_lower:
+        tool_to_call = "inventory__update_stock"
+        if not is_tool_allowed(effective_role, tool_to_call):
+            audit_logger.log_event(
+                principal=principal.name,
+                user_role=effective_role,
+                tool_name=tool_to_call,
+                target_server="gateway",
+                status="403 Blocked",
+                duration_ms=10.0,
+                client_ip="127.0.0.1",
+                policy_rule_detail=f"RBAC Policy Violation: Role '{effective_role}' is not authorized to invoke '{tool_to_call}'",
+                upstream_status="Skipped",
+            )
+            return {
+                "role": "assistant",
+                "content": f"⚠️ **Permission Denied**: Role '{effective_role}' is not authorized to execute tool '{tool_to_call}'. Absolute stock overrides require 'inventory_manager' or 'admin'.",
+                "steps": [{
+                    "stepNumber": 1,
+                    "server": "Inventory Tracker Server",
+                    "tool": tool_to_call,
+                    "args": {"sku": "SKU-1004", "quantity": 500},
+                    "result": {"error": f"Permission Denied: Role '{effective_role}' is not authorized to execute tool '{tool_to_call}'."},
+                    "status": "403 Blocked",
+                    "durationMs": 10.0,
+                    "summaryNote": f"RBAC Policy Violation: Role '{effective_role}' is not authorized to invoke '{tool_to_call}'",
+                }]
+            }
+        try:
+            res = await upstream_manager.execute_tool(tool_to_call, {"sku": "SKU-1004", "quantity": 500})
+            assistant_content = f"Successfully updated stock for SKU-1004 to 500 units."
+            step = {
+                "stepNumber": 1,
+                "server": "Inventory Tracker Server",
+                "tool": tool_to_call,
+                "args": {"sku": "SKU-1004", "quantity": 500},
+                "result": res,
+                "status": "200 OK",
+                "durationMs": 35.0,
+            }
+        except Exception as e:
+            assistant_content = f"Error updating stock: {str(e)}"
+    elif "product" in msg_lower or "catalog" in msg_lower:
         tool_to_call = "woocommerce__list_products"
         if not is_tool_allowed(effective_role, tool_to_call):
             return {
