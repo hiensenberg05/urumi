@@ -47,3 +47,24 @@ Thumbs.db
 # Kubernetes & Local logs
 *.log
 .kind/
+
+# Credentials, Keys & Secrets
+*.env*
+!*.env.example
+*.pem
+*.key
+*.cert
+*.crt
+id_rsa*
+*.p12
+*.pfx
+secrets/
+credentials/
+claude_desktop_config.json
+
+# Temporary & Office lock files
+~$*
+*.docx
+*.pdf
+*.tmp
+
