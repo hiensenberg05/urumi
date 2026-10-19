@@ -162,6 +162,7 @@ export function App() {
             {currentView === 'overview' && (
               <OverviewView 
                 servers={servers}
+                tools={tools}
                 auditLogs={auditLogs}
                 clientSessions={MOCK_CLIENT_SESSIONS}
                 onOpenTrace={(log) => setSelectedTraceLog(log)}
@@ -190,13 +191,15 @@ export function App() {
               <AuditLogsView 
                 logs={auditLogs}
                 onSelectLog={(log) => setSelectedTraceLog(log)}
+                onRefresh={fetchLivePlatformState}
               />
             )}
 
             {currentView === 'chat' && (
               <ChatView 
-                messages={MOCK_CHAT_MESSAGES}
                 currentUser={currentUser}
+                servers={servers}
+                tools={tools}
               />
             )}
 

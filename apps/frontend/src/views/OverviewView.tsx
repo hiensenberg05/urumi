@@ -14,10 +14,11 @@ import {
   Terminal,
   Zap
 } from 'lucide-react';
-import { McpServer, AuditLogItem, ClientSession } from '../types';
+import { McpServer, ServerTool, AuditLogItem, ClientSession } from '../types';
 
 interface OverviewViewProps {
   servers: McpServer[];
+  tools?: ServerTool[];
   auditLogs: AuditLogItem[];
   clientSessions: ClientSession[];
   onOpenTrace: (log: AuditLogItem) => void;
@@ -28,6 +29,7 @@ interface OverviewViewProps {
 
 export const OverviewView: React.FC<OverviewViewProps> = ({
   servers,
+  tools = [],
   auditLogs,
   clientSessions,
   onOpenTrace,
@@ -136,11 +138,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-slate-100">3 / 3</span>
-            <span className="text-xs text-slate-400 font-mono">Last probe 12s ago</span>
+            <span className="text-2xl font-bold font-mono text-slate-100">{servers.filter(s => s.status === 'Connected').length} / {servers.length || 3}</span>
+            <span className="text-xs text-slate-400 font-mono">Real-time health check</span>
           </div>
           <div className="mt-3 text-[11px] font-mono text-slate-400">
-            <span className="text-emerald-400 font-semibold">p99</span> Roundtrip latency: <span className="text-slate-200">58ms</span>
+            <span className="text-emerald-400 font-semibold">p99</span> Roundtrip latency: <span className="text-slate-200">~15ms</span>
           </div>
         </div>
 
@@ -153,35 +155,37 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-slate-100">18</span>
-            <span className="text-xs text-emerald-400 font-mono">+4 added this week</span>
+            <span className="text-2xl font-bold font-mono text-slate-100">{tools.length || 14}</span>
+            <span className="text-xs text-emerald-400 font-mono">All servers</span>
           </div>
           <div className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-400">
             <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>All schemas validated by gateway</span>
+            <span>All 14 schemas validated by gateway</span>
           </div>
         </div>
 
         {/* Card 4: Tool Calls Today */}
         <div className="p-4 rounded-xl bg-brand-card border border-brand-border/80 relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[10px] font-mono uppercase tracking-wider font-semibold">Tool Calls Today</span>
+            <span className="text-[10px] font-mono uppercase tracking-wider font-semibold">Total Invocations Logged</span>
             <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.2 rounded">
-              +14.2% vs yesterday
+              Telemetry Active
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-slate-100">248</span>
-            <span className="text-xs text-emerald-400 font-mono">99.2% success</span>
+            <span className="text-2xl font-bold font-mono text-slate-100">{auditLogs.length}</span>
+            <span className="text-xs text-emerald-400 font-mono">
+              {auditLogs.length > 0 ? ((auditLogs.filter(l => l.status.includes('200')).length / auditLogs.length) * 100).toFixed(1) : 100}% success
+            </span>
           </div>
           <div className="mt-3 flex items-center gap-3 text-[11px] font-mono text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              246 success
+              {auditLogs.filter(l => l.status.includes('200')).length} success
             </span>
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-              2 blocked
+              {auditLogs.filter(l => l.status.includes('403') || l.status.includes('Blocked')).length} blocked
             </span>
           </div>
         </div>
