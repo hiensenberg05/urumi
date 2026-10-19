@@ -91,16 +91,32 @@ async def list_orders(
     status: Optional[str] = None,
     per_page: int = 10,
     page: int = 1,
-) -> List[Dict[str, Any]]:
-    """List customer orders from WooCommerce store.
+    product_id: Optional[int] = None,
+    sku: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List customer orders from WooCommerce store with filtering and pagination metadata.
     
     Args:
-        status: Filter by order status: 'pending', 'processing', 'completed', 'cancelled', etc.
+        status: Filter by order status: 'pending', 'processing', 'completed', 'cancelled', or 'any'
         per_page: Number of orders per page (default: 10)
         page: Page number to retrieve (default: 1)
+        product_id: Optional WooCommerce product ID to filter orders containing this product
+        sku: Optional product SKU to filter orders containing this product
+        start_date: Optional start date filter (ISO format or YYYY-MM-DD, e.g. '2026-10-18')
+        end_date: Optional end date filter (ISO format or YYYY-MM-DD, e.g. '2026-10-19')
     """
-    orders = await wc_client.list_orders(status=status, per_page=per_page, page=page)
-    return [
+    res = await wc_client.list_orders(
+        status=status,
+        per_page=per_page,
+        page=page,
+        product_id=product_id,
+        sku=sku,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    formatted_orders = [
         {
             "id": o.get("id"),
             "status": o.get("status"),
@@ -117,12 +133,21 @@ async def list_orders(
                     "quantity": item.get("quantity"),
                     "subtotal": item.get("subtotal"),
                     "total": item.get("total"),
+                    "sku": item.get("sku", ""),
                 }
                 for item in o.get("line_items", [])
             ],
         }
-        for o in orders
+        for o in res.get("orders", [])
     ]
+    return {
+        "orders": formatted_orders,
+        "total": res.get("total", len(formatted_orders)),
+        "page": res.get("page", page),
+        "per_page": res.get("per_page", per_page),
+        "total_pages": res.get("total_pages", 1),
+        "has_more": res.get("has_more", False),
+    }
 
 @mcp.tool(name="woocommerce__get_order")
 async def get_order(order_id: int) -> Dict[str, Any]:
@@ -154,6 +179,7 @@ async def get_order(order_id: int) -> Dict[str, Any]:
                 "quantity": item.get("quantity"),
                 "subtotal": item.get("subtotal"),
                 "total": item.get("total"),
+                "sku": item.get("sku", ""),
             }
             for item in o.get("line_items", [])
         ],

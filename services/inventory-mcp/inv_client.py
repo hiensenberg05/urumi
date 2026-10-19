@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, List, Optional
 import httpx
 from inv_config import settings
@@ -58,6 +59,33 @@ class InventoryClient:
             "stock_status": prod.get("stock_status"),
         }
 
+    async def batch_check_stock(self, skus: List[str]) -> Dict[str, Any]:
+        """Check inventory stock levels for a batch of SKUs in one call."""
+        async def _check_one(sku: str) -> Dict[str, Any]:
+            return await self.check_stock(sku)
+
+        cleaned_skus = [s.strip() for s in skus if s and s.strip()]
+        tasks = [_check_one(sku) for sku in cleaned_skus]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        items = []
+        found_count = 0
+        for sku, res in zip(cleaned_skus, results):
+            if isinstance(res, Exception):
+                items.append({"sku": sku, "found": False, "error": str(res)})
+            elif isinstance(res, dict):
+                items.append(res)
+                if res.get("found"):
+                    found_count += 1
+            else:
+                items.append({"sku": sku, "found": False})
+
+        return {
+            "items": items,
+            "total_requested": len(cleaned_skus),
+            "total_found": found_count,
+        }
+
     async def list_low_stock(self, threshold: int = 10, per_page: int = 100) -> List[Dict[str, Any]]:
         async with self._get_client() as client:
             resp = await client.get(f"{self.api_base}/products", params={"per_page": per_page, "status": "publish"})
@@ -94,10 +122,23 @@ class InventoryClient:
         low_stock_items.sort(key=lambda x: x["stock_quantity"])
         return low_stock_items
 
-    async def update_stock(self, sku: str, quantity: int) -> Dict[str, Any]:
+    async def update_stock(
+        self,
+        sku: str,
+        quantity: int,
+        expected_previous_quantity: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
         prod = await self.get_product_by_sku(sku)
         if not prod:
             raise ValueError(f"Product with SKU '{sku}' not found.")
+
+        current_qty = prod.get("stock_quantity")
+        if expected_previous_quantity is not None and current_qty != expected_previous_quantity:
+            raise ValueError(
+                f"Optimistic Lock Conflict: Expected previous stock {expected_previous_quantity}, "
+                f"but current stock is {current_qty}. The stock has changed concurrently."
+            )
 
         product_id = prod["id"]
         stock_status = "instock" if quantity > 0 else "outofstock"
@@ -111,14 +152,61 @@ class InventoryClient:
             resp = await client.put(f"{self.api_base}/products/{product_id}", json=payload)
             resp.raise_for_status()
             updated = resp.json()
-            return {
+            result = {
                 "id": updated.get("id"),
                 "name": updated.get("name"),
                 "sku": updated.get("sku"),
                 "stock_quantity": updated.get("stock_quantity"),
                 "stock_status": updated.get("stock_status"),
-                "previous_quantity": prod.get("stock_quantity"),
+                "previous_quantity": current_qty,
                 "status": "success",
             }
+            if reason:
+                result["reason"] = reason
+            return result
+
+    async def adjust_stock(
+        self,
+        sku: str,
+        delta: int,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        prod = await self.get_product_by_sku(sku)
+        if not prod:
+            raise ValueError(f"Product with SKU '{sku}' not found.")
+
+        current_qty = prod.get("stock_quantity") or 0
+        new_quantity = current_qty + delta
+        if new_quantity < 0:
+            raise ValueError(
+                f"Invalid Stock Adjustment: Adjustment of {delta:+d} on current stock {current_qty} "
+                f"would result in negative inventory ({new_quantity})."
+            )
+
+        product_id = prod["id"]
+        stock_status = "instock" if new_quantity > 0 else "outofstock"
+        payload = {
+            "manage_stock": True,
+            "stock_quantity": new_quantity,
+            "stock_status": stock_status,
+        }
+
+        async with self._get_client() as client:
+            resp = await client.put(f"{self.api_base}/products/{product_id}", json=payload)
+            resp.raise_for_status()
+            updated = resp.json()
+            result = {
+                "id": updated.get("id"),
+                "name": updated.get("name"),
+                "sku": updated.get("sku"),
+                "stock_quantity": updated.get("stock_quantity"),
+                "stock_status": updated.get("stock_status"),
+                "previous_quantity": current_qty,
+                "delta": delta,
+                "status": "success",
+            }
+            if reason:
+                result["reason"] = reason
+            return result
 
 client = InventoryClient()

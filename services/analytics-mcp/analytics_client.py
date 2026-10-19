@@ -43,19 +43,39 @@ class AnalyticsClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_daily_sales(self) -> Dict[str, Any]:
+    async def get_daily_sales(
+        self,
+        date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
         orders = await self._fetch_all_orders()
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        today_orders = []
+        is_explicit_filter = bool(date or start_date or end_date)
+        target_date = date.strip() if date else (None if (start_date or end_date) else today_str)
+
+        matched_orders = []
         gross_sales = 0.0
         total_items = 0
         status_counts: Dict[str, int] = {}
 
         for o in orders:
-            date_created = o.get("date_created", "")
-            if date_created.startswith(today_str) or not date_created:
-                today_orders.append(o)
+            order_date = (o.get("date_created") or "")[:10]
+            matches = False
+            if target_date:
+                matches = (order_date == target_date)
+            elif start_date and end_date:
+                matches = (start_date <= order_date <= end_date)
+            elif start_date:
+                matches = (order_date >= start_date)
+            elif end_date:
+                matches = (order_date <= end_date)
+            else:
+                matches = (order_date == today_str)
+
+            if matches:
+                matched_orders.append(o)
                 total_val = float(o.get("total", 0.0) or 0.0)
                 status = o.get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
@@ -64,22 +84,27 @@ class AnalyticsClient:
                     gross_sales += total_val
                     total_items += sum(item.get("quantity", 0) for item in o.get("line_items", []))
 
-        # Fallback to recent sample if today has no activity yet
-        if not today_orders and orders:
+        # Fallback to recent sample only if default today query had 0 orders
+        if not matched_orders and not is_explicit_filter and orders:
             for o in orders[:5]:
-                today_orders.append(o)
+                matched_orders.append(o)
                 total_val = float(o.get("total", 0.0) or 0.0)
                 status = o.get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
                 if status in ("completed", "processing"):
                     gross_sales += total_val
                     total_items += sum(item.get("quantity", 0) for item in o.get("line_items", []))
+
+        filter_label = target_date or f"{start_date or 'beginning'} to {end_date or 'now'}"
 
         return {
-            "date": today_str,
+            "query_period": filter_label,
+            "date": target_date or (start_date if start_date else today_str),
+            "start_date": start_date,
+            "end_date": end_date,
             "gross_sales": round(gross_sales, 2),
             "currency": orders[0].get("currency", "USD") if orders else "USD",
-            "orders_count": len(today_orders),
+            "orders_count": len(matched_orders),
             "items_sold": total_items,
             "status_breakdown": status_counts,
             "recent_orders": [
@@ -88,12 +113,17 @@ class AnalyticsClient:
                     "status": o.get("status"),
                     "total": o.get("total"),
                     "customer": f"{o.get('billing', {}).get('first_name', '')} {o.get('billing', {}).get('last_name', '')}".strip(),
+                    "date_created": o.get("date_created"),
                 }
-                for o in today_orders[:5]
+                for o in matched_orders[:10]
             ],
         }
 
-    async def get_revenue_summary(self, period: str = "30d") -> Dict[str, Any]:
+    async def get_revenue_summary(
+        self,
+        period: str = "30d",
+        group_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
         orders = await self._fetch_all_orders()
         total_revenue = 0.0
         completed_orders = 0
@@ -101,29 +131,48 @@ class AnalyticsClient:
         cancelled_orders = 0
         total_items_sold = 0
         daily_map: Dict[str, float] = {}
+        product_map: Dict[int, Dict[str, Any]] = {}
 
         for o in orders:
             status = o.get("status")
             total_val = float(o.get("total", 0.0) or 0.0)
             date_key = (o.get("date_created") or "2026-10-18")[:10]
 
-            if status == "completed":
-                completed_orders += 1
+            if status in ("completed", "processing"):
+                if status == "completed":
+                    completed_orders += 1
+                else:
+                    processing_orders += 1
+
                 total_revenue += total_val
-                total_items_sold += sum(item.get("quantity", 0) for item in o.get("line_items", []))
                 daily_map[date_key] = daily_map.get(date_key, 0.0) + total_val
-            elif status == "processing":
-                processing_orders += 1
-                total_revenue += total_val
-                total_items_sold += sum(item.get("quantity", 0) for item in o.get("line_items", []))
-                daily_map[date_key] = daily_map.get(date_key, 0.0) + total_val
+
+                for item in o.get("line_items", []):
+                    qty = item.get("quantity", 0)
+                    item_total = float(item.get("total", 0.0) or 0.0)
+                    p_id = item.get("product_id") or 0
+                    total_items_sold += qty
+
+                    if p_id not in product_map:
+                        product_map[p_id] = {
+                            "product_id": p_id,
+                            "name": item.get("name", "Unknown Product"),
+                            "sku": item.get("sku", ""),
+                            "units_sold": 0,
+                            "revenue": 0.0,
+                            "orders_count": 0,
+                        }
+                    product_map[p_id]["units_sold"] += qty
+                    product_map[p_id]["revenue"] += item_total
+                    product_map[p_id]["orders_count"] += 1
+
             elif status in ("cancelled", "failed"):
                 cancelled_orders += 1
 
         successful_orders = completed_orders + processing_orders
         aov = round(total_revenue / successful_orders, 2) if successful_orders > 0 else 0.0
 
-        return {
+        res: Dict[str, Any] = {
             "period": period,
             "total_revenue": round(total_revenue, 2),
             "average_order_value": aov,
@@ -133,8 +182,22 @@ class AnalyticsClient:
             "processing_orders": processing_orders,
             "cancelled_orders": cancelled_orders,
             "total_items_sold": total_items_sold,
-            "daily_revenue": [{"date": d, "revenue": round(r, 2)} for d, r in sorted(daily_map.items())],
         }
+
+        if group_by == "product":
+            sorted_products = sorted(
+                product_map.values(),
+                key=lambda x: (x["revenue"], x["units_sold"]),
+                reverse=True,
+            )
+            for p in sorted_products:
+                p["revenue"] = round(p["revenue"], 2)
+            res["grouped_by"] = "product"
+            res["products"] = sorted_products
+        else:
+            res["daily_revenue"] = [{"date": d, "revenue": round(r, 2)} for d, r in sorted(daily_map.items())]
+
+        return res
 
     async def get_top_selling_products(self, limit: int = 5) -> List[Dict[str, Any]]:
         orders = await self._fetch_all_orders()
@@ -154,6 +217,7 @@ class AnalyticsClient:
                     product_aggregates[p_id] = {
                         "product_id": p_id,
                         "name": item.get("name"),
+                        "sku": item.get("sku", ""),
                         "total_units_sold": 0,
                         "total_revenue": 0.0,
                     }

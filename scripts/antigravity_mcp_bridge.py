@@ -21,7 +21,7 @@ def _call_gateway(tool_name: str, arguments: Dict[str, Any]) -> Any:
         "Content-Type": "application/json",
         "User-Agent": "Antigravity-MCP-Bridge/1.0",
     }
-    with httpx.Client(timeout=25.0) as client:
+    with httpx.Client(timeout=30.0) as client:
         resp = client.post(
             f"{GATEWAY_URL}/api/v1/tools/call",
             headers=headers,
@@ -66,9 +66,28 @@ def create_product(
     )
 
 @mcp.tool(name="woocommerce__list_orders")
-def list_orders(status: str = "any", per_page: int = 10) -> Any:
-    """List recent customer orders from WooCommerce."""
-    return _call_gateway("woocommerce__list_orders", {"status": status, "per_page": per_page})
+def list_orders(
+    status: Optional[str] = None,
+    per_page: int = 10,
+    page: int = 1,
+    product_id: Optional[int] = None,
+    sku: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Any:
+    """List customer orders with filtering (by status, product_id, SKU, date range) and total count pagination."""
+    args: Dict[str, Any] = {"per_page": per_page, "page": page}
+    if status is not None:
+        args["status"] = status
+    if product_id is not None:
+        args["product_id"] = product_id
+    if sku is not None:
+        args["sku"] = sku
+    if start_date is not None:
+        args["start_date"] = start_date
+    if end_date is not None:
+        args["end_date"] = end_date
+    return _call_gateway("woocommerce__list_orders", args)
 
 @mcp.tool(name="woocommerce__get_order")
 def get_order(order_id: int) -> Any:
@@ -109,28 +128,72 @@ def check_stock(sku: str) -> Any:
     """Check inventory stock levels and availability by SKU."""
     return _call_gateway("inventory__check_stock", {"sku": sku})
 
+@mcp.tool(name="inventory__batch_check_stock")
+def batch_check_stock(skus: List[str]) -> Any:
+    """Check inventory stock levels for a batch of SKUs in a single call."""
+    return _call_gateway("inventory__batch_check_stock", {"skus": skus})
+
 @mcp.tool(name="inventory__list_low_stock")
 def list_low_stock(threshold: int = 10) -> Any:
     """Find items whose stock quantity is below or equal to a threshold."""
     return _call_gateway("inventory__list_low_stock", {"threshold": threshold})
 
 @mcp.tool(name="inventory__update_stock")
-def update_stock(sku: str, quantity: int) -> Any:
-    """Update warehouse inventory count for a specific SKU."""
-    return _call_gateway("inventory__update_stock", {"sku": sku, "quantity": quantity})
+def update_stock(
+    sku: str,
+    quantity: int,
+    expected_previous_quantity: Optional[int] = None,
+    reason: Optional[str] = None,
+) -> Any:
+    """Update warehouse inventory count with optimistic concurrency check and audit reason."""
+    args: Dict[str, Any] = {"sku": sku, "quantity": quantity}
+    if expected_previous_quantity is not None:
+        args["expected_previous_quantity"] = expected_previous_quantity
+    if reason is not None:
+        args["reason"] = reason
+    return _call_gateway("inventory__update_stock", args)
+
+@mcp.tool(name="inventory__adjust_stock")
+def adjust_stock(
+    sku: str,
+    delta: int,
+    reason: Optional[str] = None,
+) -> Any:
+    """Safely adjust warehouse inventory by a relative delta (e.g. +20, -5) with an audit reason."""
+    args: Dict[str, Any] = {"sku": sku, "delta": delta}
+    if reason is not None:
+        args["reason"] = reason
+    return _call_gateway("inventory__adjust_stock", args)
 
 # -------------------------------------------------------------
 # Business Analytics MCP Tools
 # -------------------------------------------------------------
 @mcp.tool(name="analytics__get_daily_sales")
-def get_daily_sales() -> Any:
-    """Get gross revenue, total orders, and average order value for today."""
-    return _call_gateway("analytics__get_daily_sales", {})
+def get_daily_sales(
+    date: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Any:
+    """Get gross revenue, total orders, and metrics for today, a specific date, or a custom date range."""
+    args: Dict[str, Any] = {}
+    if date is not None:
+        args["date"] = date
+    if start_date is not None:
+        args["start_date"] = start_date
+    if end_date is not None:
+        args["end_date"] = end_date
+    return _call_gateway("analytics__get_daily_sales", args)
 
 @mcp.tool(name="analytics__get_revenue_summary")
-def get_revenue_summary(days: int = 30) -> Any:
-    """Get revenue summary over a given rolling number of days."""
-    return _call_gateway("analytics__get_revenue_summary", {"days": days})
+def get_revenue_summary(
+    period: str = "30d",
+    group_by: Optional[str] = None,
+) -> Any:
+    """Get revenue summary over a given period, with optional product grouping ('group_by=product')."""
+    args: Dict[str, Any] = {"period": period}
+    if group_by is not None:
+        args["group_by"] = group_by
+    return _call_gateway("analytics__get_revenue_summary", args)
 
 @mcp.tool(name="analytics__get_top_selling_products")
 def get_top_selling_products(limit: int = 5) -> Any:

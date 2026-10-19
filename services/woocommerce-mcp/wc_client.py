@@ -81,14 +81,46 @@ class WooCommerceClient:
         status: Optional[str] = None,
         per_page: int = 10,
         page: int = 1,
-    ) -> List[Dict[str, Any]]:
+        product_id: Optional[int] = None,
+        sku: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"per_page": per_page, "page": page}
-        if status:
+        if status and status != "any":
             params["status"] = status
+
+        if start_date:
+            after_val = start_date if "T" in start_date else f"{start_date}T00:00:00"
+            params["after"] = after_val
+        if end_date:
+            before_val = end_date if "T" in end_date else f"{end_date}T23:59:59"
+            params["before"] = before_val
+
+        target_product_id = product_id
+        if not target_product_id and sku:
+            async with self._get_client() as client:
+                p_resp = await client.get(f"{self.api_base}/products", params={"sku": sku.strip()})
+                if p_resp.status_code == 200 and p_resp.json():
+                    target_product_id = p_resp.json()[0]["id"]
+
+        if target_product_id:
+            params["product"] = target_product_id
+
         async with self._get_client() as client:
             resp = await client.get(f"{self.api_base}/orders", params=params)
             resp.raise_for_status()
-            return resp.json()
+            raw_orders = resp.json()
+            total_count = int(resp.headers.get("x-wp-total", len(raw_orders)))
+            total_pages = int(resp.headers.get("x-wp-totalpages", 1 if total_count <= per_page else (total_count + per_page - 1) // per_page))
+            return {
+                "orders": raw_orders,
+                "total": total_count,
+                "page": page,
+                "per_page": per_page,
+                "total_pages": total_pages,
+                "has_more": page < total_pages,
+            }
 
     async def get_order(self, order_id: int) -> Dict[str, Any]:
         async with self._get_client() as client:
@@ -122,6 +154,12 @@ class WooCommerceClient:
         }
         async with self._get_client() as client:
             resp = await client.post(f"{self.api_base}/orders", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_order_status(self, order_id: int, status: str) -> Dict[str, Any]:
+        async with self._get_client() as client:
+            resp = await client.put(f"{self.api_base}/orders/{order_id}", json={"status": status})
             resp.raise_for_status()
             return resp.json()
 

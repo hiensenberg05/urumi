@@ -132,8 +132,10 @@ class UpstreamManager:
 
         inv_tools = [
             ("inventory__check_stock", "Check stock level and availability by SKU"),
+            ("inventory__batch_check_stock", "Check stock levels for multiple SKUs in batch"),
             ("inventory__list_low_stock", "Find items below reorder threshold"),
             ("inventory__update_stock", "Update stock quantity for a given SKU"),
+            ("inventory__adjust_stock", "Safely adjust stock by relative delta with audit reason"),
         ]
         self.servers["srv-inventory"].tools = [
             {

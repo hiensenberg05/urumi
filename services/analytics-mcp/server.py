@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastmcp import FastMCP
 from starlette.responses import JSONResponse
 from starlette.requests import Request
@@ -19,21 +19,32 @@ async def health(request: Request) -> JSONResponse:
     })
 
 @mcp.tool(name="analytics__get_daily_sales")
-async def get_daily_sales() -> Dict[str, Any]:
-    """Retrieve today's gross sales, order volume, and unit metrics.
+async def get_daily_sales(
+    date: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Retrieve gross sales, order volume, and unit metrics for today, a specific date, or a custom date range.
     
-    Returns gross sales revenue, order counts, units sold, and status breakdown.
+    Args:
+        date: Specific date in YYYY-MM-DD format (default: today)
+        start_date: Start date for date range query (YYYY-MM-DD)
+        end_date: End date for date range query (YYYY-MM-DD)
     """
-    return await analytics_client.get_daily_sales()
+    return await analytics_client.get_daily_sales(date=date, start_date=start_date, end_date=end_date)
 
 @mcp.tool(name="analytics__get_revenue_summary")
-async def get_revenue_summary(period: str = "30d") -> Dict[str, Any]:
-    """Calculate aggregated store revenue, average order value (AOV), and order breakdown.
+async def get_revenue_summary(
+    period: str = "30d",
+    group_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Calculate aggregated store revenue, average order value (AOV), and optional product revenue grouping.
     
     Args:
         period: Reporting period window, e.g. '7d', '30d', 'all' (default: '30d')
+        group_by: Optional grouping dimension. Use 'product' to group revenue and units sold by product, or omit for daily trend.
     """
-    return await analytics_client.get_revenue_summary(period=period)
+    return await analytics_client.get_revenue_summary(period=period, group_by=group_by)
 
 @mcp.tool(name="analytics__get_top_selling_products")
 async def get_top_selling_products(limit: int = 5) -> List[Dict[str, Any]]:
