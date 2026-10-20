@@ -45,13 +45,20 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            onClick={onOpenGenerateModal}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs font-mono shadow-md shadow-emerald-500/20 transition cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Generate Gateway Token</span>
-          </button>
+          {currentUser.role === 'ADMIN' ? (
+            <button
+              onClick={onOpenGenerateModal}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs font-mono shadow-md shadow-emerald-500/20 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Generate Gateway Token</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/30 border border-red-800/40 text-red-400 text-xs font-mono">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>Admin Privileges Required to Manage Keys</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -140,12 +147,18 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-right">
                       {!k.isRevoked ? (
-                        <button
-                          onClick={() => onRevokeKey(k.id)}
-                          className="px-2.5 py-1 rounded bg-red-950/40 hover:bg-red-950/80 border border-red-800/60 text-red-400 text-[11px] font-semibold transition"
-                        >
-                          Revoke
-                        </button>
+                        currentUser.role === 'ADMIN' ? (
+                          <button
+                            onClick={() => onRevokeKey(k.id)}
+                            className="px-2.5 py-1 rounded bg-red-950/40 hover:bg-red-950/80 border border-red-800/60 text-red-400 text-[11px] font-semibold transition cursor-pointer"
+                          >
+                            Revoke
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-mono px-2 py-0.5 rounded bg-brand-surface border border-brand-border">
+                            Admin Only
+                          </span>
+                        )
                       ) : (
                         <span className="text-[11px] text-slate-400">Archived</span>
                       )}

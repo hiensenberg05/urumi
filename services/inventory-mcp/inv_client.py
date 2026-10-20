@@ -129,6 +129,11 @@ class InventoryClient:
         expected_previous_quantity: Optional[int] = None,
         reason: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if quantity < 0:
+            raise ValueError(f"Invalid inventory quantity: {quantity}. Stock cannot be negative.")
+        if quantity > 500000:
+            raise ValueError(f"Quantity {quantity} exceeds maximum batch threshold (500,000 units).")
+
         prod = await self.get_product_by_sku(sku)
         if not prod:
             raise ValueError(f"Product with SKU '{sku}' not found.")
@@ -171,6 +176,11 @@ class InventoryClient:
         delta: int,
         reason: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if delta == 0:
+            raise ValueError("Stock delta cannot be 0. Provide a non-zero positive or negative adjustment.")
+        if abs(delta) > 50000:
+            raise ValueError(f"Adjustment delta {delta} exceeds safe threshold of ±50,000 units.")
+
         prod = await self.get_product_by_sku(sku)
         if not prod:
             raise ValueError(f"Product with SKU '{sku}' not found.")

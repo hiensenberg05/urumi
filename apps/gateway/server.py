@@ -218,7 +218,19 @@ class CreateApiKeyRequest(BaseModel):
 
 @app.get("/api/v1/api-keys")
 async def get_api_keys(principal: Principal = Depends(get_current_principal)):
-    return list(api_keys_db.values())
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can view workspace API keys.",
+        )
+    # Mask full secrets to prevent token exfiltration
+    return [
+        {
+            **k,
+            "key": f"{k['key'][:8]}********",
+        }
+        for k in api_keys_db.values()
+    ]
 
 @app.post("/api/v1/api-keys", status_code=status.HTTP_201_CREATED)
 async def create_api_key(
@@ -293,6 +305,51 @@ async def get_stats(principal: Principal = Depends(get_current_principal)):
 # -------------------------------------------------------------
 # Tool Execution API with RBAC Enforcement & Telemetry
 # -------------------------------------------------------------
+def validate_tool_arguments(tool_name: str, args: Dict[str, Any]) -> Optional[str]:
+    """Validate tool parameters at the Gateway perimeter."""
+    if "update_stock" in tool_name:
+        qty = args.get("quantity")
+        if qty is None:
+            return "Missing required parameter 'quantity'."
+        if not isinstance(qty, (int, float)) or qty < 0:
+            return f"Invalid inventory quantity: {qty}. Stock cannot be negative."
+        if qty > 500000:
+            return f"Quantity {qty} exceeds maximum batch threshold (500,000 units)."
+
+    if "adjust_stock" in tool_name:
+        delta = args.get("delta")
+        if delta is None:
+            return "Missing required parameter 'delta'."
+        try:
+            delta_int = int(delta)
+        except (ValueError, TypeError):
+            return f"Invalid delta value '{delta}'. Must be an integer."
+        if delta_int == 0:
+            return "Stock delta cannot be 0. Provide a non-zero positive or negative adjustment."
+        if abs(delta_int) > 50000:
+            return f"Adjustment delta {delta} exceeds safe threshold of ±50,000 units."
+
+    if "create_product" in tool_name:
+        price = args.get("regular_price")
+        if price is not None:
+            try:
+                p = float(price)
+                if p < 0:
+                    return "Product price cannot be negative."
+                if p > 1000000:
+                    return "Product price exceeds ceiling of $1,000,000."
+            except (ValueError, TypeError):
+                return f"Invalid price format '{price}'."
+
+    if "batch_check_stock" in tool_name:
+        skus = args.get("skus")
+        if not isinstance(skus, list) or len(skus) == 0:
+            return "Parameter 'skus' must be a non-empty list of SKU strings."
+        if len(skus) > 100:
+            return f"Batch size {len(skus)} exceeds limit of 100 SKUs."
+
+    return None
+
 class ToolCallRequest(BaseModel):
     tool: str
     arguments: Dict[str, Any] = Field(default_factory=dict)
@@ -328,7 +385,29 @@ async def call_tool(
             detail=f"Permission Denied: Role '{principal.role}' is not authorized to execute tool '{req.tool}'.",
         )
 
-    # 2. Dispatch to Upstream MCP Server
+    # 2. Enforce Tool Parameter Bounds Validation at Perimeter
+    val_err = validate_tool_arguments(req.tool, req.arguments)
+    if val_err:
+        duration_ms = (time.monotonic() - start_time) * 1000
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name=req.tool,
+            target_server="gateway",
+            status="400 Bad Request",
+            duration_ms=duration_ms,
+            client_ip=client_ip,
+            client_agent=client_agent,
+            params=req.arguments,
+            policy_rule_detail=f"Parameter Validation Error: {val_err}",
+            upstream_status="Rejected",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Tool Arguments: {val_err}",
+        )
+
+    # 3. Dispatch to Upstream MCP Server
     srv = upstream_manager.get_server_for_tool(req.tool)
     target_server_name = srv.name if srv else "unknown"
 
@@ -386,7 +465,26 @@ async def chat_execute(
     principal: Principal = Depends(get_current_principal),
 ):
     """Simple agent runner endpoint for the frontend playground."""
-    effective_role = req.role_override or principal.role
+    # Prevent privilege escalation: Non-admin principals cannot override role
+    if req.role_override and req.role_override != principal.role:
+        if principal.role != ROLE_ADMIN:
+            audit_logger.log_event(
+                principal=principal.name,
+                user_role=principal.role,
+                tool_name="role_escalation_attempt",
+                target_server="gateway",
+                status="403 Blocked",
+                duration_ms=0.5,
+                policy_rule_detail=f"Security Violation: Non-admin role '{principal.role}' attempted to override role to '{req.role_override}'",
+                upstream_status="Rejected",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Privilege Escalation Blocked: Role '{principal.role}' is not authorized to override roles.",
+            )
+        effective_role = req.role_override
+    else:
+        effective_role = principal.role
 
     # 1. Forward to AI Service (Groq gpt-oss-120b ReAct Agent) if running
     ai_service_url = os.environ.get("AI_SERVICE_URL", "http://ai-service.default.svc.cluster.local:8004/api/v1/agent/chat")

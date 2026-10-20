@@ -123,12 +123,17 @@ export function App() {
   // Revoke API key (satisfies rubric requirement: "Revoke user B's key. Their next call is rejected.")
   const handleRevokeKey = async (keyId: string) => {
     try {
-      await fetch(`/api/v1/api-keys/${keyId}`, {
+      const res = await fetch(`/api/v1/api-keys/${keyId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': 'Bearer admin-key-urumi-2026' },
+        headers: { 'X-API-Key': activeApiKey },
       });
+      if (!res.ok) {
+        console.warn(`Revocation blocked: HTTP ${res.status}`);
+        return;
+      }
     } catch (e) {
-      // Optimistic local update fallback
+      // Network error
+      return;
     }
     setApiKeys(prev => prev.map(k => {
       if (k.id === keyId || k.key === keyId) {

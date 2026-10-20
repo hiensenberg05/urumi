@@ -424,12 +424,12 @@ class AgentRunner:
                     except Exception:
                         fn_args = {}
 
-                    # Guardrail: Tool Argument Bounds Check
-                    arg_check = guardrails.validate_tool_arguments(fn_name, fn_args)
-                    guardrail_reports.append(arg_check)
+                    # 1. Guardrail: Role Permission Authorization Check
+                    role_check = guardrails.validate_role_permissions(user_role, fn_name)
+                    guardrail_reports.append(role_check)
 
-                    if not arg_check.passed:
-                        tool_result = {"error": f"Guardrail Rejected: {arg_check.details}"}
+                    if not role_check.passed:
+                        tool_result = {"error": f"Guardrail Rejected: {role_check.details}"}
                         step = ToolStep(
                             stepNumber=len(executed_steps) + 1,
                             server="Safety Guardrail Engine",
@@ -438,27 +438,45 @@ class AgentRunner:
                             result=tool_result,
                             status="403 Blocked",
                             durationMs=0.5,
-                            summaryNote=arg_check.details,
+                            summaryNote=role_check.details,
                         )
                         executed_steps.append(step)
                     else:
-                        # Execute via Gateway
-                        tool_result, duration_ms, status_str, srv_name = await self._execute_tool_via_gateway(
-                            tool_name=fn_name,
-                            arguments=fn_args,
-                            api_key=api_key,
-                        )
-                        step = ToolStep(
-                            stepNumber=len(executed_steps) + 1,
-                            server=srv_name,
-                            tool=fn_name,
-                            args=fn_args,
-                            result=tool_result,
-                            status=status_str,
-                            durationMs=duration_ms,
-                            summaryNote=f"Executed on {srv_name} with status {status_str}",
-                        )
-                        executed_steps.append(step)
+                        # 2. Guardrail: Tool Argument Bounds Check
+                        arg_check = guardrails.validate_tool_arguments(fn_name, fn_args)
+                        guardrail_reports.append(arg_check)
+
+                        if not arg_check.passed:
+                            tool_result = {"error": f"Guardrail Rejected: {arg_check.details}"}
+                            step = ToolStep(
+                                stepNumber=len(executed_steps) + 1,
+                                server="Safety Guardrail Engine",
+                                tool=fn_name,
+                                args=fn_args,
+                                result=tool_result,
+                                status="403 Blocked",
+                                durationMs=0.5,
+                                summaryNote=arg_check.details,
+                            )
+                            executed_steps.append(step)
+                        else:
+                            # 3. Execute via Gateway
+                            tool_result, duration_ms, status_str, srv_name = await self._execute_tool_via_gateway(
+                                tool_name=fn_name,
+                                arguments=fn_args,
+                                api_key=api_key,
+                            )
+                            step = ToolStep(
+                                stepNumber=len(executed_steps) + 1,
+                                server=srv_name,
+                                tool=fn_name,
+                                args=fn_args,
+                                result=tool_result,
+                                status=status_str,
+                                durationMs=duration_ms,
+                                summaryNote=f"Executed on {srv_name} with status {status_str}",
+                            )
+                            executed_steps.append(step)
 
                     # Append tool result to messages for next reasoning turn
                     messages.append({

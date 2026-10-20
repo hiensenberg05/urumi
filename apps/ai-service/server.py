@@ -49,7 +49,7 @@ async def chat_endpoint(
     request: Request,
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ):
-    api_key = x_api_key or "admin-key-urumi-2026"
+    api_key = x_api_key or "support-key-urumi-2026"
     effective_role = req.role_override or ("admin" if "admin" in api_key.lower() else "support_rep")
 
     response = await agent_runner.run(
