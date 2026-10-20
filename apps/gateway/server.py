@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import time
 import uuid
@@ -43,14 +44,14 @@ rate_limiter = RateLimiter(
     burst=settings.rate_limit_burst,
 )
 
-# In-memory API keys storage (initialized with defaults)
+# In-memory API keys storage (stored securely as SHA-256 hashes)
 api_keys_db: Dict[str, Dict[str, Any]] = {}
 for key, data in settings.default_api_keys.items():
     key_id = f"key_{uuid.uuid4().hex[:8]}"
-    api_keys_db[key] = {
+    key_hash = hashlib.sha256(key.encode()).hexdigest()
+    api_keys_db[key_hash] = {
         "id": key_id,
         "name": data["name"],
-        "key": key,
         "keyPrefix": f"{key[:8]}...",
         "role": data["role"],
         "scope": data["scope"],
@@ -90,8 +91,9 @@ async def get_current_principal(
             detail="Missing authentication credentials. Provide 'X-API-Key' header or 'Bearer <token>'.",
         )
 
-    # Check key validity
-    key_info = api_keys_db.get(token)
+    # Check key validity via cryptographic SHA-256 hash lookup
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    key_info = api_keys_db.get(token_hash)
     if not key_info or key_info.get("isRevoked"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -171,6 +173,30 @@ async def list_servers(principal: Principal = Depends(get_current_principal)):
         })
     return result
 
+@app.post("/api/v1/servers/{server_id}/toggle")
+async def toggle_server(
+    server_id: str,
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can enable or disable upstream servers.",
+        )
+    srv = upstream_manager.toggle_server_status(server_id)
+    if not srv:
+        raise HTTPException(status_code=404, detail=f"Server '{server_id}' not found.")
+    
+    audit_logger.log_event(
+        principal=principal.name,
+        user_role=principal.role,
+        tool_name=f"server_toggle_{srv.status.lower()}",
+        target_server=srv.name,
+        status=f"200 Server {srv.status}",
+        duration_ms=1.0,
+    )
+    return {"id": srv.id, "name": srv.name, "status": srv.status}
+
 # -------------------------------------------------------------
 # Tools & RBAC Discovery API
 # -------------------------------------------------------------
@@ -227,7 +253,7 @@ async def get_api_keys(principal: Principal = Depends(get_current_principal)):
     return [
         {
             **k,
-            "key": f"{k['key'][:8]}********",
+            "key": f"{k.get('keyPrefix', 'key-****')[:8]}********",
         }
         for k in api_keys_db.values()
     ]
@@ -250,10 +276,10 @@ async def create_api_key(
 
     new_key = f"{req.role[:3]}-key-{uuid.uuid4().hex[:12]}"
     new_id = f"key_{uuid.uuid4().hex[:8]}"
+    key_hash = hashlib.sha256(new_key.encode()).hexdigest()
     item = {
         "id": new_id,
         "name": req.name,
-        "key": new_key,
         "keyPrefix": f"{new_key[:8]}...",
         "role": req.role,
         "scope": req.scope,
@@ -262,8 +288,9 @@ async def create_api_key(
         "expiresAt": "Never",
         "isRevoked": False,
     }
-    api_keys_db[new_key] = item
-    return item
+    # Store hashed key only
+    api_keys_db[key_hash] = item
+    return {**item, "key": new_key}
 
 @app.delete("/api/v1/api-keys/{key_id}")
 async def revoke_api_key(
@@ -275,8 +302,9 @@ async def revoke_api_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can revoke API keys.",
         )
-    for k, v in api_keys_db.items():
-        if v["id"] == key_id or v["key"] == key_id:
+    target_hash = hashlib.sha256(key_id.encode()).hexdigest()
+    for khash, v in api_keys_db.items():
+        if v["id"] == key_id or khash == target_hash:
             v["isRevoked"] = True
             return {"status": "success", "message": f"API Key '{v['name']}' has been revoked."}
     raise HTTPException(status_code=404, detail="API Key not found.")

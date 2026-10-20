@@ -176,6 +176,13 @@ class UpstreamManager:
             for name, desc in ana_tools
         ]
 
+    def toggle_server_status(self, server_id: str) -> Optional[UpstreamServer]:
+        srv = self.servers.get(server_id)
+        if not srv:
+            return None
+        srv.status = "Disabled" if srv.status != "Disabled" else "Connected"
+        return srv
+
     def get_server_for_tool(self, tool_name: str) -> Optional[UpstreamServer]:
         for srv in self.servers.values():
             if tool_name.startswith(srv.prefix):
@@ -189,13 +196,16 @@ class UpstreamManager:
     def get_all_tools(self) -> List[Dict[str, Any]]:
         all_tools = []
         for srv in self.servers.values():
-            all_tools.extend(srv.tools)
+            if srv.status != "Disabled":
+                all_tools.extend(srv.tools)
         return all_tools
 
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         srv = self.get_server_for_tool(tool_name)
         if not srv:
             raise ValueError(f"No upstream MCP server found for tool '{tool_name}'")
+        if srv.status == "Disabled":
+            raise ValueError(f"Upstream server '{srv.name}' is currently disabled.")
 
         async with Client(srv.endpoint_url, timeout=15.0) as client:
             res = await client.call_tool(tool_name, arguments)

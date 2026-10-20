@@ -90,14 +90,25 @@ export function App() {
   };
 
   // Toggle server active state (e.g. for testing disabled server scenario from rubric!)
-  const handleToggleServerStatus = (serverId: string) => {
-    setServers(prev => prev.map(s => {
-      if (s.id === serverId) {
-        const nextStatus = s.status === 'Connected' ? 'Disabled' : 'Connected';
-        return { ...s, status: nextStatus };
+  const handleToggleServerStatus = async (serverId: string) => {
+    try {
+      const res = await fetch(`/api/v1/servers/${serverId}/toggle`, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': activeApiKey,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setServers(prev => prev.map(s => s.id === serverId ? { ...s, status: data.status } : s));
+        // Refresh tool catalog and logs
+        fetchTools();
+        fetchAuditLogs();
       }
-      return s;
-    }));
+    } catch (err) {
+      console.error('Failed to toggle server status:', err);
+    }
   };
 
   // Add new server
