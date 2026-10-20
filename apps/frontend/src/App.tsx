@@ -102,9 +102,8 @@ export function App() {
       if (res.ok) {
         const data = await res.json();
         setServers(prev => prev.map(s => s.id === serverId ? { ...s, status: data.status } : s));
-        // Refresh tool catalog and logs
-        fetchTools();
-        fetchAuditLogs();
+        // Refresh platform state (servers, tools, logs)
+        fetchLivePlatformState();
       }
     } catch (err) {
       console.error('Failed to toggle server status:', err);

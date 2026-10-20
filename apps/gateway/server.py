@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Header, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -741,6 +742,30 @@ async def chat_execute(
         "content": assistant_content,
         "steps": [step] if step else [],
     }
+
+# -------------------------------------------------------------
+# Static Frontend Dashboard Serving (Single-Page Application)
+# -------------------------------------------------------------
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    assets_dir = os.path.join(static_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Don't intercept API routes or internal endpoints
+        if full_path.startswith("api/") or full_path.startswith("health") or full_path.startswith("docs"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        
+        file_path = os.path.join(static_dir, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        index_file = os.path.join(static_dir, "index.html")
+        if os.path.isfile(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Dashboard index not found.")
 
 if __name__ == "__main__":
     uvicorn.run("server:app", host=settings.host, port=settings.port, reload=False)
