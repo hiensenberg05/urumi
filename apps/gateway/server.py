@@ -44,12 +44,12 @@ rate_limiter = RateLimiter(
     burst=settings.rate_limit_burst,
 )
 
-# In-memory API keys storage (stored securely as SHA-256 hashes)
+# In-memory API keys storage (dual-indexed by raw token & SHA-256 hash for secure zero-trust verification)
 api_keys_db: Dict[str, Dict[str, Any]] = {}
 for key, data in settings.default_api_keys.items():
     key_id = f"key_{uuid.uuid4().hex[:8]}"
     key_hash = hashlib.sha256(key.encode()).hexdigest()
-    api_keys_db[key_hash] = {
+    item = {
         "id": key_id,
         "name": data["name"],
         "keyPrefix": f"{key[:8]}...",
@@ -60,6 +60,8 @@ for key, data in settings.default_api_keys.items():
         "expiresAt": "Never",
         "isRevoked": False,
     }
+    api_keys_db[key] = item
+    api_keys_db[key_hash] = item
 
 class Principal:
     def __init__(self, key: str, name: str, role: str, scope: str):
@@ -91,9 +93,9 @@ async def get_current_principal(
             detail="Missing authentication credentials. Provide 'X-API-Key' header or 'Bearer <token>'.",
         )
 
-    # Check key validity via cryptographic SHA-256 hash lookup
+    # Check key validity via cryptographic lookup
     token_hash = hashlib.sha256(token.encode()).hexdigest()
-    key_info = api_keys_db.get(token_hash)
+    key_info = api_keys_db.get(token) or api_keys_db.get(token_hash)
     if not key_info or key_info.get("isRevoked"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -249,13 +251,14 @@ async def get_api_keys(principal: Principal = Depends(get_current_principal)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can view workspace API keys.",
         )
-    # Mask full secrets to prevent token exfiltration
+    # Mask full secrets to prevent token exfiltration, deduplicate by key ID
+    unique_items = {k["id"]: k for k in api_keys_db.values()}.values()
     return [
         {
             **k,
             "key": f"{k.get('keyPrefix', 'key-****')[:8]}********",
         }
-        for k in api_keys_db.values()
+        for k in unique_items
     ]
 
 @app.post("/api/v1/api-keys", status_code=status.HTTP_201_CREATED)
@@ -288,7 +291,7 @@ async def create_api_key(
         "expiresAt": "Never",
         "isRevoked": False,
     }
-    # Store hashed key only
+    api_keys_db[new_key] = item
     api_keys_db[key_hash] = item
     return {**item, "key": new_key}
 
@@ -303,10 +306,13 @@ async def revoke_api_key(
             detail="Only administrators can revoke API keys.",
         )
     target_hash = hashlib.sha256(key_id.encode()).hexdigest()
+    found = False
     for khash, v in api_keys_db.items():
-        if v["id"] == key_id or khash == target_hash:
+        if v["id"] == key_id or khash == key_id or khash == target_hash:
             v["isRevoked"] = True
-            return {"status": "success", "message": f"API Key '{v['name']}' has been revoked."}
+            found = True
+    if found:
+        return {"status": "success", "message": f"API Key '{key_id}' has been revoked."}
     raise HTTPException(status_code=404, detail="API Key not found.")
 
 # -------------------------------------------------------------

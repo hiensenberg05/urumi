@@ -6,12 +6,14 @@ interface ApiKeyModalProps {
   isOpen: boolean;
   onClose: () => void;
   onKeyCreated?: (newKey: ApiKeyItem) => void;
+  activeApiKey?: string;
 }
 
 export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   isOpen,
   onClose,
-  onKeyCreated
+  onKeyCreated,
+  activeApiKey = 'admin-key-urumi-2026'
 }) => {
   const [step, setStep] = useState<'create' | 'success'>('create');
   const [name, setName] = useState('');
@@ -57,7 +59,8 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin-key-urumi-2026',
+          'X-API-Key': activeApiKey,
+          'Authorization': `Bearer ${activeApiKey}`,
         },
         body: JSON.stringify({
           name: name.trim(),

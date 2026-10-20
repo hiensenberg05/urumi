@@ -244,6 +244,7 @@ export function App() {
       <ApiKeyModal 
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
+        activeApiKey={activeApiKey}
         onKeyCreated={(newKey) => {
           setApiKeys(prev => [newKey, ...prev.filter(k => k.id !== newKey.id)]);
         }}
