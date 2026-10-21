@@ -600,8 +600,9 @@ async def chat_execute(
 
     # 1. Forward to AI Service (Groq gpt-oss-120b ReAct Agent) if running
     ai_service_url = os.environ.get("AI_SERVICE_URL", "http://ai-service.default.svc.cluster.local:8004/api/v1/agent/chat")
+    ai_error = None
     try:
-        async with httpx.AsyncClient(timeout=35.0) as http:
+        async with httpx.AsyncClient(timeout=90.0) as http:
             ai_resp = await http.post(
                 ai_service_url,
                 headers={"X-API-Key": principal.key},
@@ -625,6 +626,7 @@ async def chat_execute(
     except Exception as e:
         import traceback
         traceback.print_exc()
+        ai_error = str(e)
         print(f"[Gateway chat_execute] AI Service invocation failed: {e}", flush=True)
 
     # 2. Fallback local runner if AI service is starting up
@@ -812,7 +814,10 @@ async def chat_execute(
         except Exception as e:
             assistant_content = f"Error retrieving analytics: {str(e)}"
     else:
-        assistant_content = f"I am your Urumi Team Agent with role '{effective_role}'. You can ask me to list products, check inventory, inspect orders, or summarize revenue."
+        if ai_error:
+            assistant_content = f"⚠️ The AI Agent encountered an issue coordinating operations: {ai_error}. Please try again."
+        else:
+            assistant_content = f"I am your Urumi Team Agent with role '{effective_role}'. You can ask me to list products, check inventory, inspect orders, or summarize revenue."
 
     return {
         "role": "assistant",
