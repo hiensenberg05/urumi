@@ -29,6 +29,18 @@ class SafetyGuardrails:
         r"rm\s+-rf\s+",
     ]
 
+    # Non-business out-of-scope patterns
+    NON_BUSINESS_PATTERNS = [
+        r"write\s+(a\s+)?(poem|song|story|haiku|essay|joke|novel)",
+        r"(tell\s+me|generate)\s+(a\s+)?(joke|riddle|bedtime\s+story)",
+        r"(recipe|cooking\s+instructions)\s+for",
+        r"how\s+to\s+(cook|bake|make\s+a\s+(cake|pizza|burger|pasta))",
+        r"who\s+(won|is|was)\s+(the\s+)?(world\s+cup|super\s+bowl|president|prime\s+minister|oscar)",
+        r"what\s+is\s+the\s+capital\s+of",
+        r"meaning\s+of\s+life",
+        r"horoscope|astrology|zodiac",
+    ]
+
     VALID_ORDER_STATUSES = {
         "pending", "processing", "on-hold", "completed", "cancelled", "refunded", "failed"
     }
@@ -69,6 +81,14 @@ class SafetyGuardrails:
                     passed=False,
                     check_name="Prompt Injection Defense",
                     details=f"Adversarial or security bypass pattern detected: '{pattern}'",
+                )
+
+        for pattern in self.NON_BUSINESS_PATTERNS:
+            if re.search(pattern, prompt_lower):
+                return GuardrailResult(
+                    passed=False,
+                    check_name="Enterprise Domain Guardrail",
+                    details="Out-of-scope request. Urumi AI Agent is strictly restricted to enterprise e-commerce, inventory, orders, and business analytics operations.",
                 )
 
         if len(user_prompt.strip()) == 0:
