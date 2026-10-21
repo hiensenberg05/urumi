@@ -1,6 +1,6 @@
 # Team MCP Gateway on Kubernetes
 
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.28-blue.svg?logo=kubernetes)](https://kubernetes.io/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34-blue.svg?logo=kubernetes)](https://kubernetes.io/)
 [![Helm 3](https://img.shields.io/badge/Helm-v3-0f1689.svg?logo=helm)](https://helm.sh/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-Python_3.12-brightgreen.svg)](https://github.com/jlowin/fastmcp)
 [![Groq LLM](https://img.shields.io/badge/LLM-Groq_GPT--OSS--120B-orange.svg)](https://groq.com/)
@@ -10,13 +10,24 @@ An enterprise-grade, secure, multi-tenant **Model Context Protocol (MCP) Gateway
 
 ---
 
+## 🌐 Quick Access URLs
+
+| Workload / Interface | Access URL | Description |
+| :--- | :--- | :--- |
+| **In-Cluster Ops Dashboard** | **[http://gateway.local](http://gateway.local)** | Production React 19 UI served directly by the Gateway container inside Kubernetes |
+| **Storefront (WooCommerce)** | **[http://store.local](http://store.local)** | Customer-facing store with Cash on Delivery (COD) payment |
+| **WordPress Admin** | **[http://store.local/wp-admin](http://store.local/wp-admin)** | Store management (`admin` / `AdminPassword123!`) |
+| **Local Dev Dashboard** | **[http://localhost:3000](http://localhost:3000)** | Vite development server with instant HMR hot-reloading |
+
+---
+
 ## 🏛️ System Architecture
 
 ```mermaid
 flowchart TD
     subgraph Clients["Clients & Developers"]
-        UI["🖥️ React 19 Ops Dashboard<br/>(http://localhost:3000)"]
-        ExtClient["🤖 External Client / IDE<br/>(Cursor, Claude, Python SDK)"]
+        UI["🖥️ React 19 Ops Dashboard<br/>(http://gateway.local & localhost:3000)"]
+        ExtClient["🤖 External Client / IDE<br/>(Cursor, Claude Desktop, Antigravity)"]
         Shopper["🛒 Human Shopper<br/>(http://store.local/shop)"]
     end
 
@@ -25,13 +36,13 @@ flowchart TD
     end
 
     subgraph CorePlatform["Core Platform Pods"]
-        GW["🛡️ Team MCP Gateway (FastAPI)<br/>gateway.local / :8000<br/>• API Key Auth & RBAC<br/>• Token Bucket Rate Limiter<br/>• Correlation ID Audit Logger"]
-        AI["🧠 AI Service (ReAct Agent)<br/>:8004<br/>• Groq gpt-oss-120b<br/>• Prompt Injection Guardrail<br/>• Parameter Bounds & PII Filter"]
+        GW["🛡️ Team MCP Gateway (FastAPI)<br/>gateway.local / :8000<br/>• SHA-256 Hashed API Key Auth & RBAC<br/>• Token Bucket Rate Limiter<br/>• Dynamic Server Toggle & Fault Isolation<br/>• In-Cluster React SPA Static Server"]
+        AI["🧠 AI Service (ReAct Agent)<br/>:8004<br/>• Groq LLM ReAct Loop<br/>• Prompt Injection Guardrail<br/>• Parameter Bounds & PII Filter"]
     end
 
     subgraph UpstreamMCP["Upstream FastMCP Microservices (Cluster-Internal)"]
         WCMCP["📦 WooCommerce MCP (:8001)<br/>• list_products, create_product<br/>• list_orders, get_order<br/>• create_order, update_order_status"]
-        INVMCP["📊 Inventory MCP (:8002)<br/>• check_stock, list_low_stock<br/>• update_stock"]
+        INVMCP["📊 Inventory MCP (:8002)<br/>• check_stock, batch_check_stock<br/>• list_low_stock, update_stock<br/>• adjust_stock (relative delta)"]
         ANAMCP["📈 Analytics MCP (:8003)<br/>• get_daily_sales, revenue_summary<br/>• get_top_selling_products"]
     end
 
@@ -63,26 +74,31 @@ flowchart TD
 ## ✨ Key Features & Enterprise Controls
 
 ### 1. Multi-Tenant Role-Based Access Control (RBAC)
-Every incoming request requires a Bearer API token. The Gateway enforces strict least-privilege policies across 12 namespaced tools:
+Every incoming request requires a Bearer API token or `X-API-Key` header. The Gateway enforces strict least-privilege policies across 14 namespaced tools:
 
 | Role | Permitted Tools | Forbidden Tools | Use Case |
 | :--- | :--- | :--- | :--- |
-| **`admin`** | All 12 tools (`woocommerce__*`, `inventory__*`, `analytics__*`) | None | System administrators & DevOps |
-| **`inventory_manager`** | `inventory__check_stock`, `inventory__list_low_stock`, `inventory__update_stock`, `woocommerce__list_products` | `woocommerce__create_order`, `analytics__*` | Warehouse & fulfillment team |
-| **`analyst`** | `analytics__get_daily_sales`, `analytics__get_revenue_summary`, `analytics__get_top_selling_products`, `woocommerce__list_products`, `woocommerce__list_orders` | `inventory__update_stock`, `woocommerce__create_product`, `woocommerce__create_order` | Business intelligence & reporting |
-| **`support_rep`** | `woocommerce__list_orders`, `woocommerce__get_order`, `woocommerce__update_order_status`, `inventory__check_stock` | Financial analytics & stock updates | Customer service agents |
+| **`admin`** | All 14 tools (`woocommerce__*`, `inventory__*`, `analytics__*`) | None | System administrators & DevOps |
+| **`inventory_manager`** | `inventory__check_stock`, `inventory__batch_check_stock`, `inventory__list_low_stock`, `inventory__update_stock`, `inventory__adjust_stock`, `woocommerce__list_products` | `woocommerce__create_order`, `analytics__*` | Warehouse & fulfillment team |
+| **`analyst`** | `analytics__get_daily_sales`, `analytics__get_revenue_summary`, `analytics__get_top_selling_products`, `woocommerce__list_products`, `woocommerce__list_orders` | `inventory__update_stock`, `inventory__adjust_stock`, `woocommerce__create_product` | Business intelligence & reporting |
+| **`support_rep`** | `woocommerce__list_products`, `woocommerce__list_orders`, `woocommerce__get_order`, `inventory__check_stock`, `inventory__batch_check_stock` | Financial analytics & stock mutations | Customer service agents |
 
-### 2. Upstream Credential Isolation & Untrusted Upstream Defense
-- **Zero Client Credential Leakage:** Upstream database credentials and WooCommerce REST API consumer keys/secrets reside exclusively in Kubernetes Secrets inside the cluster. External clients only possess Gateway API keys.
-- **Upstream Failure Isolation:** All calls to upstream servers run under an asynchronous 15-second timeout with failure isolation. If an upstream pod crashes or fails, the Gateway logs the error and returns a clean `502 Bad Gateway` without crashing or interrupting traffic to healthy upstreams.
+### 2. Cryptographic API Key Storage & Masking
+- **SHA-256 Hashing:** API keys are hashed with SHA-256 upon generation. Plaintext keys are revealed only once upon creation and never stored in raw text.
+- **Credential Masking:** Key listings (`GET /api/v1/api-keys`) are restricted to administrators and always mask secrets (`admin-ke********`).
 
-### 3. Dual-Layer AI Safety Guardrails
+### 3. Upstream Fault Isolation & Dynamic Server Disabling
+- **Deterministic Namespacing:** Tool naming collisions are resolved via double-underscore prefixes: `<server_prefix>__<tool_name>` (e.g. `woocommerce__list_orders`, `inventory__check_stock`).
+- **Dynamic Server Disabling:** Admins can enable or disable upstream servers via `POST /api/v1/servers/{server_id}/toggle`. When disabled, tools immediately disappear from tool discovery and chat.
+- **Upstream Failure Isolation:** All calls run under asynchronous timeouts (3.0s health, 15.0s tool execution). If an upstream pod crashes, the Gateway marks it `Unreachable` without cascading failure to healthy servers.
+
+### 4. Dual-Layer AI Safety Guardrails
 The AI reasoning engine (`apps/ai-service`) executes pre- and post-invocation safety hooks:
-1. **Prompt Injection Defense:** Scans user prompts against adversarial patterns (system prompt overrides, role hijack attempts, jailbreak prefixes).
-2. **Parameter Boundary Validation:** Enforces positive bounds on price, stock quantities, and order counts before dispatching tool calls.
-3. **PII & Secret Sanitization:** Regex redactions scrub credit card patterns, social security numbers, and bearer secrets from agent outputs.
+1. **Prompt Injection Defense:** Intercepts adversarial jailbreaks (*"Ignore all previous instructions..."*).
+2. **Parameter Boundary Validation:** Enforces positive bounds on price, stock quantities, and order counts.
+3. **PII & Secret Sanitization:** Redacts sensitive patterns, credit cards, and bearer tokens.
 
-### 4. Correlation-ID Audit Logging & Observability
+### 5. Correlation-ID Audit Logging & Observability
 Every execution is tracked in an in-memory & persistent log stream with:
 - Correlation ID (`req-xxxxxxxxxx`)
 - Principal name and assigned role
@@ -196,9 +212,16 @@ Add to your `claude_desktop_config.json` or Cursor MCP settings:
 ```json
 {
   "mcpServers": {
-    "urumi-team-gateway": {
+    "urumi-gateway": {
       "command": "python",
-      "args": ["-m", "mcp_proxy", "--url", "http://gateway.local/mcp", "--token", "inv-key-urumi-2026"]
+      "args": [
+        "scripts/antigravity_mcp_bridge.py"
+      ],
+      "env": {
+        "GATEWAY_API_KEY": "admin-key-urumi-2026",
+        "GATEWAY_URL": "http://127.0.0.1",
+        "GATEWAY_HOST_HEADER": "gateway.local"
+      }
     }
   }
 }
@@ -220,15 +243,26 @@ Add to your `claude_desktop_config.json` or Cursor MCP settings:
 
 ---
 
-## 📊 Automated Test Coverage
+## 📊 Automated Test Coverage & Vulnerability Scanner
 
-The platform features comprehensive automated test suites across all layers:
+The platform features automated regression and security test suites across all layers:
 
+### 1. 23-Point Security & RBAC Scanner
 ```bash
-# Run all Phase 1-5 test suites
+python scripts/vuln_scanner.py
+```
+Validates zero-trust boundaries:
+- ✅ Non-admin blocked from listing, generating, or revoking API keys
+- ✅ Admin key listing masks secrets (`admin-ke********`)
+- ✅ Privilege escalation rejection (`role_override='admin'`)
+- ✅ 401 Unauthorized across all unauthenticated endpoints
+- ✅ 8/8 RBAC cross-role matrix tests (Support Rep, Inventory Manager, Analyst)
+- ✅ Input boundary validation (negative quantities, extreme deltas, zero deltas)
+
+### 2. Pytest Unit & Integration Tests
+```bash
 pytest -v tests/
 ```
-
 - [`tests/test_phase1_gateway.py`](file:///d:/urumi%20assignment/tests/test_phase1_gateway.py): Gateway health, tool routing, and rate limiting.
 - [`tests/test_phase2_rbac.py`](file:///d:/urumi%20assignment/tests/test_phase2_rbac.py): RBAC permission matrices and token validation.
 - [`tests/test_phase3_audit.py`](file:///d:/urumi%20assignment/tests/test_phase3_audit.py): Audit logging schema, correlation IDs, and query filters.
