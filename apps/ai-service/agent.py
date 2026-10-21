@@ -272,7 +272,14 @@ class AgentRunner:
             desc = t.get("description", f"Tool {name}")
             schema = t.get("schema")
             if not schema or not schema.get("properties"):
-                schema = TOOL_SCHEMAS.get(name, {"type": "object", "properties": {}})
+                if name in TOOL_SCHEMAS:
+                    schema = TOOL_SCHEMAS[name]
+                elif name.startswith("store_") and "__" in name:
+                    suffix = name.split("__", 1)[1]
+                    wc_key = f"woocommerce__{suffix}"
+                    schema = TOOL_SCHEMAS.get(wc_key, {"type": "object", "properties": {}})
+                else:
+                    schema = {"type": "object", "properties": {}}
 
             groq_tools.append({
                 "type": "function",
@@ -290,7 +297,7 @@ class AgentRunner:
         """Dispatch a tool call to the MCP Gateway and measure latency."""
         start = time.monotonic()
         target_server = "Gateway"
-        if "woocommerce" in tool_name:
+        if "woocommerce" in tool_name or tool_name.startswith("store_"):
             target_server = "WooCommerce Store Server"
         elif "inventory" in tool_name:
             target_server = "Inventory Tracker Server"

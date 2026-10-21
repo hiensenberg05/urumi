@@ -24,6 +24,7 @@ from rbac import (
 from rate_limiter import RateLimiter
 from audit_logger import audit_logger
 from upstream_manager import upstream_manager
+from provisioner import provisioning_engine, CreateStoreRequest
 
 app = FastAPI(
     title="Unified Team MCP Gateway",
@@ -106,23 +107,24 @@ async def get_current_principal(
     # Update last used timestamp
     key_info["lastUsedAt"] = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    # Enforce Rate Limiting
-    allowed, retry_after = await rate_limiter.check_rate_limit(token)
-    if not allowed:
-        audit_logger.log_event(
-            principal=key_info["name"],
-            user_role=key_info["role"],
-            tool_name="rate_limit_exceeded",
-            target_server="gateway",
-            status="429 Rate Limit",
-            duration_ms=0.5,
-            client_ip=request.client.host if request.client else "127.0.0.1",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
-            headers={"Retry-After": str(int(retry_after) + 1)},
-        )
+    # Enforce Rate Limiting (exempt admin from polling throttling)
+    if key_info.get("role") != ROLE_ADMIN:
+        allowed, retry_after = await rate_limiter.check_rate_limit(token)
+        if not allowed:
+            audit_logger.log_event(
+                principal=key_info["name"],
+                user_role=key_info["role"],
+                tool_name="rate_limit_exceeded",
+                target_server="gateway",
+                status="429 Rate Limit",
+                duration_ms=0.5,
+                client_ip=request.client.host if request.client else "127.0.0.1",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                headers={"Retry-After": str(int(retry_after) + 1)},
+            )
 
     return Principal(
         key=token,
@@ -199,6 +201,81 @@ async def toggle_server(
         duration_ms=1.0,
     )
     return {"id": srv.id, "name": srv.name, "status": srv.status}
+
+@app.on_event("startup")
+async def on_startup():
+    asyncio.create_task(provisioning_engine.reconcile_existing_stores())
+
+# -------------------------------------------------------------
+# Multi-Store Tenant Management API
+# -------------------------------------------------------------
+@app.get("/api/v1/stores")
+async def list_stores(principal: Principal = Depends(get_current_principal)):
+    return list(provisioning_engine.stores.values())
+
+@app.post("/api/v1/stores")
+async def create_store(
+    req: CreateStoreRequest,
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can provision new store tenants.",
+        )
+    try:
+        tenant = await provisioning_engine.create_store(req)
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name="store_provision",
+            target_server="k8s_provisioner",
+            status="202 Provisioning",
+            duration_ms=5.0,
+        )
+        return tenant
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start store provisioning: {str(e)}")
+
+@app.delete("/api/v1/stores/{store_id}")
+async def delete_store(
+    store_id: str,
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete store tenants.",
+        )
+    success = await provisioning_engine.delete_store(store_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Store '{store_id}' not found.")
+    audit_logger.log_event(
+        principal=principal.name,
+        user_role=principal.role,
+        tool_name="store_teardown",
+        target_server="k8s_provisioner",
+        status="200 Deleted",
+        duration_ms=5.0,
+    )
+    return {"message": f"Store '{store_id}' teardown initiated."}
+
+@app.post("/api/v1/stores/{store_id}/retry")
+async def retry_store(
+    store_id: str,
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can retry store provisioning.",
+        )
+    tenant = await provisioning_engine.retry_store(store_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Store '{store_id}' not found.")
+    return tenant
 
 # -------------------------------------------------------------
 # Tools & RBAC Discovery API

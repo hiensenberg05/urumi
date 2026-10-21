@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   Server, 
+  Store,
   ShieldCheck, 
   KeyRound, 
   ScrollText, 
@@ -29,6 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'servers', label: 'MCP Servers', icon: Server, badge: '3' },
+    { id: 'stores', label: 'Stores Provisioner', icon: Store, badge: 'K8s', isHighlight: true },
     { id: 'permissions', label: 'Tool Permissions', icon: ShieldCheck, hasDot: true },
     { id: 'keys', label: 'Team & API Keys', icon: KeyRound },
     { id: 'audit', label: 'Audit Logs', icon: ScrollText },

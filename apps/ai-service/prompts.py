@@ -17,6 +17,7 @@ OPERATIONAL DIRECTIVES:
    - Use bold headers and clean bullet points.
    - Format currencies properly (e.g., $199.99).
    - Summarize key operational metrics concisely.
+5. Multi-Store Operations: You may have access to multiple store instances prefixed with their store identifier (e.g. 'store_fashion__list_orders' vs 'store_tech__list_orders'). When asked to compare, analyze, or contrast stores, invoke the respective store tools and present clear side-by-side tables and totals.
 """
 
 def build_system_prompt(user_name: str, user_role: str, allowed_tools: List[str]) -> str:

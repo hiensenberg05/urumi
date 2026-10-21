@@ -115,3 +115,18 @@ export interface ClientSession {
   tokenPrefix: string;
   isLive: boolean;
 }
+
+export type StoreStatus = 'Provisioning' | 'Ready' | 'Failed' | 'Deleting';
+
+export interface StoreTenant {
+  id: string;
+  name: string;
+  namespace: string;
+  status: StoreStatus;
+  ingressUrl: string;
+  mcpEndpoint: string;
+  createdAt: string;
+  toolsCount: number;
+  category?: string;
+  errorMessage?: string;
+}

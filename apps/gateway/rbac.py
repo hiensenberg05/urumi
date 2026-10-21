@@ -67,20 +67,37 @@ TOOL_RISK_PROFILES: Dict[str, str] = {
     "analytics__get_top_selling_products": "Medium (Read Aggregate)",
 }
 
+def _normalize_tool_for_rbac(tool_name: str) -> str:
+    """Normalize dynamic tenant tool names (e.g. store_fashion__list_orders) to base tool (woocommerce__list_orders)."""
+    if tool_name.startswith("store_") and "__" in tool_name:
+        action = tool_name.split("__", 1)[1]
+        return f"woocommerce__{action}"
+    return tool_name
+
 def is_tool_allowed(role: str, tool_name: str) -> bool:
     """Check if the given role has permission to invoke the tool."""
     if role == ROLE_ADMIN:
         return True
     allowed = ROLE_PERMISSIONS.get(role, set())
-    return tool_name in allowed
+    if tool_name in allowed:
+        return True
+    normalized = _normalize_tool_for_rbac(tool_name)
+    return normalized in allowed
 
 def filter_allowed_tools(role: str, all_tool_names: List[str]) -> List[str]:
     """Filter list of tools to only those permitted for the role."""
     if role == ROLE_ADMIN:
         return all_tool_names
     allowed = ROLE_PERMISSIONS.get(role, set())
-    return [t for t in all_tool_names if t in allowed]
+    result = []
+    for t in all_tool_names:
+        if t in allowed:
+            result.append(t)
+        elif _normalize_tool_for_rbac(t) in allowed:
+            result.append(t)
+    return result
 
 def get_tool_risk(tool_name: str) -> str:
     """Return risk profile category for a given tool."""
-    return TOOL_RISK_PROFILES.get(tool_name, "Low (Read-only)")
+    normalized = _normalize_tool_for_rbac(tool_name)
+    return TOOL_RISK_PROFILES.get(normalized, TOOL_RISK_PROFILES.get(tool_name, "Low (Read-only)"))

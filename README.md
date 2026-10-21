@@ -271,5 +271,49 @@ pytest -v tests/
 
 ---
 
+## 🏬 Bonus: Autonomous Multi-Store Provisioning Platform
+
+The platform includes a complete **Kubernetes-native Multi-Store Provisioning Engine** that turns the single-store deployment into an ephemeral, multi-tenant SaaS store factory.
+
+### Key Capabilities
+1. **Dashboard Lifecycle Management:**
+   - Administrators can provision and teardown store tenants on demand from the **"Stores"** tab.
+   - Real-time progress indicators: 🟡 *Provisioning* $\rightarrow$ 🟢 *Ready* $\rightarrow$ 🔴 *Failed* $\rightarrow$ ⚪ *Deleting*.
+2. **Kubernetes-Native Isolation:**
+   - Every store is deployed into its own namespace (`store-<slug>`) with a dedicated MariaDB database, persistent volumes (PVCs), WordPress storefront, and WooCommerce MCP server.
+   - **NetworkPolicy Enforcement:** Strict ingress/egress policies isolate tenant namespaces. Pods in `store-fashion` cannot communicate with or access databases in `store-tech`.
+3. **Guardrails & Quotas:**
+   - **`ResourceQuota`:** Limits CPU (500m request / 2000m limit), memory (800Mi request / 2Gi limit), PVCs (2), and pods (6) per tenant namespace.
+   - **`LimitRange`:** Default container CPU and memory allocations.
+   - **Store Quota:** Enforces a maximum cap of 5 concurrent active stores.
+   - **Timeout Watchdog:** 180s timeout with automatic status reconciler and clear error reporting.
+4. **Dynamic Tool Namespacing & Registration:**
+   - When a tenant passes readiness probes, the Gateway automatically mounts its tools with tenant prefixes:
+     - `store_tech__list_orders`
+     - `store_tech__list_products`
+     - `store_tech__create_order`
+     - `store_tech__get_order`
+   - The AI Agent dynamically binds to these tools without any manual configuration or platform restarts.
+5. **Clean Teardown:**
+   - Deleting a store unregisters its tools from the Gateway immediately and triggers an asynchronous cascade deletion of its Kubernetes namespace, destroying all pods, volumes, secrets, and network policies.
+6. **Cross-Store AI Analytics:**
+   - The AI Copilot can execute tools across multiple stores in a single conversation:
+     > *"Compare the orders and order totals between Fashion Store and Tech Store."*
+     The agent invokes `store_fashion__list_orders` and `store_tech__list_orders`, computing cross-store revenue gaps and average order values side-by-side in Markdown tables.
+
+### Automated Multi-Store Test Suite
+```bash
+python scripts/test_multi_store.py
+```
+Validates:
+- ✅ Store tenant discovery & status reconciliation
+- ✅ Dynamic tool namespacing & auto-registration
+- ✅ Live catalog product querying (`store_tech__list_products`)
+- ✅ Live order processing (`store_tech__list_orders`)
+- ✅ Zero-downtime provisioning of new store tenants (`e2e-demo`)
+- ✅ Instant cascade teardown & tool purge verification
+
+---
+
 ## 📄 License
 MIT License. Built for the Urumi AI Forward Deployed Engineer (FDE) Assignment.

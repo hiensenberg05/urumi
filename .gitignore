@@ -47,6 +47,7 @@ Thumbs.db
 # Kubernetes & Local logs
 *.log
 .kind/
+kubectl
 
 # Credentials, Keys & Secrets
 *.env*

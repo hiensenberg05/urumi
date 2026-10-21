@@ -11,6 +11,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.24 /uv /bin/uv
 COPY requirements.txt .
 RUN uv pip install --no-cache --system -r requirements.txt
 
+COPY kubectl /usr/local/bin/kubectl
+RUN chmod +x /usr/local/bin/kubectl
+
 COPY . .
 
 EXPOSE 8000

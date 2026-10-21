@@ -176,6 +176,57 @@ class UpstreamManager:
             for name, desc in ana_tools
         ]
 
+    def register_store_server(
+        self,
+        store_id: str,
+        store_name: str,
+        endpoint_url: str,
+        health_url: str,
+    ) -> UpstreamServer:
+        server_id = f"srv-store-{store_id}"
+        prefix = f"store_{store_id}__"
+        server = UpstreamServer(
+            server_id=server_id,
+            name=f"{store_name} ({store_id})",
+            tag="STORE_TENANT",
+            endpoint_url=endpoint_url,
+            health_url=health_url,
+            prefix=prefix,
+        )
+        wc_tools = [
+            ("list_products", f"List products from {store_name} catalog with pagination"),
+            ("create_product", f"Add new product to {store_name} catalog"),
+            ("list_orders", f"List recent orders from {store_name} with status filter"),
+            ("get_order", f"Retrieve single order details from {store_name} by ID"),
+            ("create_order", f"Create new customer order in {store_name}"),
+            ("update_order_status", f"Modify order status in {store_name}"),
+        ]
+        server.tools = [
+            {
+                "id": f"tool_{prefix}{suffix}",
+                "namespacedName": f"{prefix}{suffix}",
+                "originalName": f"woocommerce__{suffix}",
+                "serverId": server_id,
+                "serverName": server.name,
+                "description": desc,
+                "riskProfile": get_tool_risk(suffix),
+                "rateLimit": "60/min",
+                "policy": "ALLOW",
+                "effectiveRule": "Dynamic Multi-Store Tenant",
+                "isAllowed": True,
+            }
+            for suffix, desc in wc_tools
+        ]
+        self.servers[server_id] = server
+        return server
+
+    def unregister_store_server(self, store_id: str) -> bool:
+        server_id = f"srv-store-{store_id}"
+        if server_id in self.servers:
+            del self.servers[server_id]
+            return True
+        return False
+
     def toggle_server_status(self, server_id: str) -> Optional[UpstreamServer]:
         srv = self.servers.get(server_id)
         if not srv:
@@ -207,8 +258,14 @@ class UpstreamManager:
         if srv.status == "Disabled":
             raise ValueError(f"Upstream server '{srv.name}' is currently disabled.")
 
+        target_tool = tool_name
+        for t in srv.tools:
+            if t.get("namespacedName") == tool_name:
+                target_tool = t.get("originalName", tool_name)
+                break
+
         async with Client(srv.endpoint_url, timeout=15.0) as client:
-            res = await client.call_tool(tool_name, arguments)
+            res = await client.call_tool(target_tool, arguments)
             if hasattr(res, "data"):
                 return res.data
             elif hasattr(res, "content"):

@@ -12,6 +12,7 @@ import { AuditLogsView } from './views/AuditLogsView';
 import { ChatView } from './views/ChatView';
 import { MemberOverviewView } from './views/MemberOverviewView';
 import { ApiKeysView } from './views/ApiKeysView';
+import { StoresView } from './views/StoresView';
 
 import { 
   MOCK_USERS, 
@@ -192,6 +193,13 @@ export function App() {
                 servers={servers}
                 onToggleServerStatus={handleToggleServerStatus}
                 onAddServer={() => setIsAddServerModalOpen(true)}
+              />
+            )}
+
+            {currentView === 'stores' && (
+              <StoresView 
+                currentUser={currentUser}
+                activeApiKey={activeApiKey}
               />
             )}
 
