@@ -229,4 +229,36 @@ export interface HostedTemplate {
   tools: HostedToolInfo[];
 }
 
+export interface OAuthPersona {
+  key: string;
+  name: string;
+  role: string;
+  email: string;
+  title: string;
+  avatar: string;
+  department: string;
+  scopes: string[];
+}
+
+export interface DynamicPolicyItem {
+  namespacedName: string;
+  serverName: string;
+  description: string;
+  riskProfile: string;
+  roles: Record<string, {
+    policy: 'ALLOW' | 'DENY';
+    isCustomOverride: boolean;
+    defaultPolicy: 'ALLOW' | 'DENY';
+  }>;
+}
+
+export interface DynamicPolicyMatrix {
+  roles: Array<{ id: string; name: string }>;
+  tools: DynamicPolicyItem[];
+  totalTools: number;
+  customOverridesCount: number;
+  lastUpdated: string;
+}
+
+
 

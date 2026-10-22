@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { TraceDrawer } from './components/TraceDrawer';
 import { AddServerModal } from './components/AddServerModal';
+import { OAuthModal } from './components/OAuthModal';
 
 import { OverviewView } from './views/OverviewView';
 import { ServersView } from './views/ServersView';
@@ -35,12 +36,18 @@ export function App() {
   const [tools, setTools] = useState<ServerTool[]>(MOCK_TOOLS);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(MOCK_AUDIT_LOGS);
   const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>(MOCK_API_KEYS);
+  const [customToken, setCustomToken] = useState<string | null>(null);
+  const [isOAuthModalOpen, setIsOAuthModalOpen] = useState(false);
 
-  const activeApiKey = currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'support-key-urumi-2026';
+  const activeApiKey = customToken || (currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'support-key-urumi-2026');
+  const isJwtActive = !!activeApiKey && activeApiKey.includes('.') && activeApiKey.split('.').length === 3;
 
   const fetchLivePlatformState = async () => {
     try {
-      const headers = { 'X-API-Key': activeApiKey };
+      const headers = { 
+        'Authorization': `Bearer ${activeApiKey}`,
+        'X-API-Key': activeApiKey 
+      };
       const [serversRes, toolsRes, logsRes, keysRes] = await Promise.all([
         fetch('/api/v1/servers', { headers }),
         fetch(`/api/v1/tools?role=${currentUser.role === 'ADMIN' ? 'admin' : 'support_rep'}`, { headers }),
@@ -82,6 +89,7 @@ export function App() {
 
   // Toggle user role between Admin (Sarah) and Member (Alex) for live testing
   const handleToggleUser = () => {
+    setCustomToken(null);
     if (currentUser.role === 'ADMIN') {
       setCurrentUser(MOCK_USERS[1]); // Alex (Member)
       setCurrentView('member-overview');
@@ -89,6 +97,18 @@ export function App() {
       setCurrentUser(MOCK_USERS[0]); // Sarah (Admin)
       setCurrentView('overview');
     }
+  };
+
+  // OAuth 2.0 login handler
+  const handleLoginPersona = (token: string, user: User) => {
+    setCustomToken(token);
+    setCurrentUser(user);
+    if (user.role === 'ADMIN') {
+      setCurrentView('overview');
+    } else {
+      setCurrentView('chat');
+    }
+    fetchLivePlatformState();
   };
 
   // Toggle server active state (e.g. for testing disabled server scenario from rubric!)
@@ -163,6 +183,8 @@ export function App() {
         setCurrentView={setCurrentView}
         currentUser={currentUser}
         onToggleUser={handleToggleUser}
+        onOpenOAuth={() => setIsOAuthModalOpen(true)}
+        isJwtActive={isJwtActive}
       />
 
       {/* Main Workspace Area */}
@@ -171,6 +193,8 @@ export function App() {
         <Navbar 
           currentView={currentView}
           currentUser={currentUser}
+          onOpenOAuth={() => setIsOAuthModalOpen(true)}
+          isJwtActive={isJwtActive}
         />
 
         {/* Viewport Content */}
@@ -207,8 +231,9 @@ export function App() {
 
             {currentView === 'permissions' && (
               <PermissionsView 
-                tools={tools}
-                onSavePolicies={(updated) => setTools(updated)}
+                currentUser={currentUser}
+                activeApiKey={activeApiKey}
+                onPoliciesUpdated={fetchLivePlatformState}
               />
             )}
 
@@ -281,6 +306,15 @@ export function App() {
         isOpen={isAddServerModalOpen}
         onClose={() => setIsAddServerModalOpen(false)}
         onAddServer={handleAddServer}
+      />
+
+      {/* Enterprise OAuth 2.0 & JWT Identity Modal */}
+      <OAuthModal 
+        isOpen={isOAuthModalOpen}
+        onClose={() => setIsOAuthModalOpen(false)}
+        currentUser={currentUser}
+        activeToken={activeApiKey}
+        onLoginPersona={handleLoginPersona}
       />
     </div>
   );

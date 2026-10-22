@@ -5,9 +5,11 @@ import { User } from '../types';
 interface NavbarProps {
   currentView: string;
   currentUser: User;
+  onOpenOAuth?: () => void;
+  isJwtActive?: boolean;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentView, currentUser }) => {
+export const Navbar: React.FC<NavbarProps> = ({ currentView, currentUser, onOpenOAuth, isJwtActive = false }) => {
   const getViewTitle = (id: string) => {
     switch (id) {
       case 'overview': return 'Overview';
@@ -52,10 +54,20 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, currentUser }) => {
         {/* Live Cluster Upstream Status Badge */}
         <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/60 text-xs font-mono text-emerald-400">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="font-medium text-[11px]">All 3 Upstreams Healthy</span>
-          <span className="text-slate-400">•</span>
-          <span className="text-[11px] text-slate-400">42ms</span>
+          <span className="font-medium text-[11px]">Upstreams Healthy</span>
         </div>
+
+        {/* OAuth 2.0 / JWT Badge */}
+        {onOpenOAuth && (
+          <button
+            onClick={onOpenOAuth}
+            title="Inspect JWT Claims or Switch Identity via OAuth 2.0"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-950/40 hover:bg-purple-900/60 border border-purple-800/60 text-xs font-mono text-purple-300 transition cursor-pointer"
+          >
+            <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+            <span className="font-semibold text-[11px]">{isJwtActive ? 'OAuth 2.0 (JWT)' : 'OAuth / SSO'}</span>
+          </button>
+        )}
 
         {/* Notification Bell */}
         <button 

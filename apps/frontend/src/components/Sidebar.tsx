@@ -20,13 +20,17 @@ interface SidebarProps {
   setCurrentView: (view: string) => void;
   currentUser: User;
   onToggleUser: () => void;
+  onOpenOAuth?: () => void;
+  isJwtActive?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentView,
   setCurrentView,
   currentUser,
-  onToggleUser
+  onToggleUser,
+  onOpenOAuth,
+  isJwtActive = false
 }) => {
   const navItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -142,6 +146,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
           <ExternalLink className="w-3 h-3 text-slate-400" />
         </a>
+
+        {/* Enterprise OAuth 2.0 Identity Switcher Button */}
+        {onOpenOAuth && (
+          <button
+            onClick={onOpenOAuth}
+            className="w-full mb-2 p-2 rounded-lg bg-purple-950/30 hover:bg-purple-900/40 border border-purple-800/50 flex items-center justify-between text-xs text-purple-300 transition group"
+            title="Open Enterprise OAuth 2.0 & Cryptographic JWT Manager"
+          >
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
+              <span className="font-semibold">{isJwtActive ? "OAuth 2.0 (JWT Active)" : "OAuth 2.0 & SSO"}</span>
+            </div>
+            <span className="text-[10px] font-mono bg-purple-900/60 px-1.5 py-0.2 rounded border border-purple-700/60 text-purple-200">
+              Manage
+            </span>
+          </button>
+        )}
 
         {/* User Card with Role Toggle Button */}
         <div 

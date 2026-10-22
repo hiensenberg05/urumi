@@ -14,13 +14,16 @@ import uvicorn
 
 from config import settings
 from rbac import (
-    is_tool_allowed,
     filter_allowed_tools,
     get_tool_risk,
     ROLE_PERMISSIONS,
     ALL_ROLES,
     ROLE_ADMIN,
 )
+from policy_engine import policy_engine
+# Alias is_tool_allowed to the dynamic policy engine so all downstream calls use dynamic rules
+is_tool_allowed = policy_engine.is_tool_allowed
+import jwt_auth
 from rate_limiter import RateLimiter
 from audit_logger import audit_logger
 from upstream_manager import upstream_manager
@@ -68,11 +71,25 @@ for key, data in settings.default_api_keys.items():
     api_keys_db[key_hash] = item
 
 class Principal:
-    def __init__(self, key: str, name: str, role: str, scope: str):
+    def __init__(
+        self,
+        key: str,
+        name: str,
+        role: str,
+        scope: str,
+        user_id: str = "",
+        auth_type: str = "API Key",
+        email: str = "",
+        avatar: str = "",
+    ):
         self.key = key
         self.name = name
         self.role = role
         self.scope = scope
+        self.user_id = user_id
+        self.auth_type = auth_type
+        self.email = email
+        self.avatar = avatar
 
 async def get_current_principal(
     request: Request,
@@ -90,14 +107,63 @@ async def get_current_principal(
 
     if not token:
         # Check if caller is requesting health or public endpoint
-        if request.url.path in ("/health", "/", "/docs", "/openapi.json", "/metrics"):
+        if request.url.path in ("/health", "/", "/docs", "/openapi.json", "/metrics", "/api/v1/auth/providers"):
             return Principal(key="anonymous", name="Anonymous", role="public", scope="none")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication credentials. Provide 'X-API-Key' header or 'Bearer <token>'.",
         )
 
-    # Check key validity via cryptographic lookup
+    # 1. First check if token is an RFC 7519 Cryptographic JWT (3 parts separated by '.')
+    if token.count(".") == 2:
+        is_valid, payload, err = jwt_auth.verify_jwt(token)
+        if not is_valid or not payload:
+            telemetry.record_rbac_violation("unknown", "jwt_auth_failure")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Cryptographic JWT authentication failed: {err}",
+            )
+        
+        user_role = payload.get("role", "support_rep")
+        user_name = payload.get("name", "OAuth User")
+        user_id = payload.get("sub", f"usr_{uuid.uuid4().hex[:6]}")
+        user_email = payload.get("email", f"{user_name.lower().replace(' ', '.')}@urumi.enterprise")
+        user_avatar = payload.get("avatar", "")
+        scopes_list = payload.get("scopes", [])
+        scopes_str = ",".join(scopes_list) if isinstance(scopes_list, list) else str(scopes_list)
+
+        # Enforce rate limiting on JWT user (exempt admin)
+        if user_role != ROLE_ADMIN:
+            allowed, retry_after = await rate_limiter.check_rate_limit(user_id)
+            if not allowed:
+                telemetry.record_rate_limit(user_id)
+                audit_logger.log_event(
+                    principal=user_name,
+                    user_role=user_role,
+                    tool_name="rate_limit_exceeded",
+                    target_server="gateway",
+                    status="429 Rate Limit",
+                    duration_ms=0.5,
+                    client_ip=request.client.host if request.client else "127.0.0.1",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                    headers={"Retry-After": str(int(retry_after) + 1)},
+                )
+
+        return Principal(
+            key=token,
+            name=user_name,
+            role=user_role,
+            scope=scopes_str,
+            user_id=user_id,
+            auth_type="OAuth 2.0 (JWT)",
+            email=user_email,
+            avatar=user_avatar,
+        )
+
+    # 2. Backward Compatibility: Check legacy API key via cryptographic lookup
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     key_info = api_keys_db.get(token) or api_keys_db.get(token_hash)
     if not key_info or key_info.get("isRevoked"):
@@ -134,6 +200,10 @@ async def get_current_principal(
         name=key_info["name"],
         role=key_info["role"],
         scope=key_info["scope"],
+        user_id=key_info.get("id", "legacy_key"),
+        auth_type="API Key",
+        email=f"{key_info['role']}@urumi.enterprise",
+        avatar="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80" if key_info["role"] != ROLE_ADMIN else "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
     )
 
 # -------------------------------------------------------------
@@ -496,6 +566,187 @@ async def revoke_api_key(
     if found:
         return {"status": "success", "message": f"API Key '{key_id}' has been revoked."}
     raise HTTPException(status_code=404, detail="API Key not found.")
+
+# -------------------------------------------------------------
+# Enterprise OAuth 2.0 & Identity Management Endpoints
+# -------------------------------------------------------------
+class OAuthTokenRequest(BaseModel):
+    grant_type: str = Field(default="persona", description="persona, authorization_code, or password")
+    persona: Optional[str] = Field(default="alice", description="alice, bob, charlie, or dana")
+    username: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = Field(default="support_rep")
+    code: Optional[str] = None
+    provider: Optional[str] = Field(default="mock-sso")
+
+class PolicyUpdateItem(BaseModel):
+    role: str
+    tool: str
+    policy: str = Field(default="INHERIT", description="ALLOW, DENY, or INHERIT")
+
+class BatchPolicyUpdateRequest(BaseModel):
+    updates: List[PolicyUpdateItem]
+
+@app.get("/api/v1/auth/providers")
+async def list_auth_providers():
+    """List supported enterprise OAuth 2.0 / OIDC identity providers and quick test personas."""
+    return {
+        "providers": jwt_auth.SUPPORTED_PROVIDERS,
+        "personas": [
+            {
+                "key": k,
+                "name": p["name"],
+                "role": p["role"],
+                "email": p["email"],
+                "title": p["title"],
+                "avatar": p["avatar"],
+                "department": p["department"],
+                "scopes": p["scopes"],
+            }
+            for k, p in jwt_auth.ENTERPRISE_PERSONAS.items()
+        ]
+    }
+
+@app.post("/api/v1/auth/oauth/token")
+async def issue_oauth_token(req: OAuthTokenRequest):
+    """
+    OAuth 2.0 Token Authority: Exchange credentials, authorization code, or test persona for an RFC 7519 signed JWT.
+    """
+    if req.grant_type == "persona" or (req.persona and req.persona in jwt_auth.ENTERPRISE_PERSONAS):
+        persona_key = req.persona or "alice"
+        try:
+            token_response = jwt_auth.issue_access_token_for_persona(persona_key)
+            audit_logger.log_event(
+                principal=token_response["user"]["name"],
+                user_role=token_response["user"]["role"],
+                tool_name="oauth_token_issue",
+                target_server="jwt_authority",
+                status="200 Issued",
+                duration_ms=1.0,
+            )
+            return token_response
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    
+    # Custom / Federated IdP login flow
+    user_name = req.username or (req.email.split("@")[0].title() if req.email else "OAuth User")
+    user_email = req.email or f"{user_name.lower().replace(' ', '.')}@urumi.enterprise"
+    user_id = f"usr_{uuid.uuid4().hex[:8]}"
+    role = req.role if req.role in ALL_ROLES else "support_rep"
+    
+    token_response = jwt_auth.issue_custom_access_token(
+        user_id=user_id,
+        name=user_name,
+        email=user_email,
+        role=role,
+    )
+    audit_logger.log_event(
+        principal=user_name,
+        user_role=role,
+        tool_name="oauth_custom_login",
+        target_server="jwt_authority",
+        status="200 Issued",
+        duration_ms=1.0,
+    )
+    return token_response
+
+@app.get("/api/v1/auth/me")
+async def get_current_user_profile(principal: Principal = Depends(get_current_principal)):
+    """
+    Introspect current authenticated caller identity, token type, and cryptographic claims.
+    """
+    is_jwt = principal.auth_type == "OAuth 2.0 (JWT)"
+    claims = None
+    if is_jwt:
+        _, claims, _ = jwt_auth.verify_jwt(principal.key)
+    
+    return {
+        "principal": {
+            "id": principal.user_id,
+            "name": principal.name,
+            "email": principal.email,
+            "role": principal.role,
+            "avatar": principal.avatar,
+            "authType": principal.auth_type,
+            "scope": principal.scope,
+            "scopes": [s.strip() for s in principal.scope.split(",") if s.strip()],
+        },
+        "token": {
+            "type": principal.auth_type,
+            "prefix": f"{principal.key[:10]}...",
+            "isJwt": is_jwt,
+            "claims": claims,
+        }
+    }
+
+# -------------------------------------------------------------
+# Dynamic Policy Studio Endpoints
+# -------------------------------------------------------------
+@app.get("/api/v1/policies")
+async def get_dynamic_policies(principal: Principal = Depends(get_current_principal)):
+    """Get the active dynamic policy matrix across all tools and roles."""
+    tools = upstream_manager.get_all_tools()
+    return policy_engine.get_policy_matrix(tools)
+
+@app.put("/api/v1/policies")
+async def update_dynamic_policies(
+    req: BatchPolicyUpdateRequest,
+    principal: Principal = Depends(get_current_principal),
+):
+    """Admin-only update of real-time role/tool permissions."""
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can modify dynamic tool authorization policies.",
+        )
+    
+    updates_dict = [u.model_dump() for u in req.updates]
+    updated_count = policy_engine.batch_set_policies(updates_dict, modified_by=principal.name)
+    
+    audit_logger.log_event(
+        principal=principal.name,
+        user_role=principal.role,
+        tool_name="policy_matrix_update",
+        target_server="policy_engine",
+        status=f"200 OK ({updated_count} updated)",
+        duration_ms=2.0,
+        params={"updatesCount": updated_count, "items": updates_dict[:5]},
+        policy_rule_detail=f"Admin {principal.name} modified {updated_count} cluster policy rules",
+    )
+    
+    tools = upstream_manager.get_all_tools()
+    return {
+        "status": "success",
+        "updatedCount": updated_count,
+        "matrix": policy_engine.get_policy_matrix(tools),
+    }
+
+@app.post("/api/v1/policies/reset")
+async def reset_dynamic_policies(principal: Principal = Depends(get_current_principal)):
+    """Admin-only reset of all policy overrides back to baseline defaults."""
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can reset cluster authorization policies.",
+        )
+    
+    policy_engine.reset_policies(modified_by=principal.name)
+    audit_logger.log_event(
+        principal=principal.name,
+        user_role=principal.role,
+        tool_name="policy_matrix_reset",
+        target_server="policy_engine",
+        status="200 Reset",
+        duration_ms=1.0,
+        policy_rule_detail=f"Admin {principal.name} restored factory baseline policies",
+    )
+    
+    tools = upstream_manager.get_all_tools()
+    return {
+        "status": "reset",
+        "message": "All cluster tool policies reverted to baseline defaults.",
+        "matrix": policy_engine.get_policy_matrix(tools),
+    }
 
 # -------------------------------------------------------------
 # Audit Logs & Telemetry API
