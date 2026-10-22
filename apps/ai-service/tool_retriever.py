@@ -61,8 +61,13 @@ class BM25ToolRetriever:
         props = schema.get("properties", {}) if isinstance(schema, dict) else {}
         param_names = " ".join(props.keys())
 
+        # Tag core default WooCommerce tools with default/primary store keywords
+        extra_tags = ""
+        if name.startswith("woocommerce__"):
+            extra_tags = "default primary core main store"
+
         # Construct weighted document string (name is repeated for prominence)
-        return f"{name} {name} {server} {desc} {param_names}"
+        return f"{name} {name} {server} {desc} {param_names} {extra_tags}"
 
     def retrieve(
         self,
@@ -158,7 +163,9 @@ class BM25ToolRetriever:
 
             # Store specific tenant boost: e.g. "tech" in query strongly boosts "store_tech"
             for q in query_tokens:
-                if len(q) >= 4 and f"store_{q}" in tool_name_lower or f"{q}__" in tool_name_lower:
+                if len(q) >= 3 and (f"store_{q}" in tool_name_lower or f"{q}__" in tool_name_lower):
+                    doc_score += 4.0
+                elif q in ("default", "primary", "main") and tool_name_lower.startswith("woocommerce__"):
                     doc_score += 4.0
 
             scores[i] = doc_score
@@ -166,17 +173,41 @@ class BM25ToolRetriever:
         # 4. Rank indices by score descending
         ranked_indices = sorted(range(total_docs), key=lambda idx: scores[idx], reverse=True)
 
+        is_comparison = any(w in query.lower() for w in ["compare", "vs", "versus", "between", "both"])
+        effective_top_k = max(top_k, 8) if is_comparison else top_k
+
         selected_tools: List[Dict[str, Any]] = []
         selected_names: Set[str] = set()
+        prefix_counts: Dict[str, int] = {}
 
         for idx in ranked_indices:
             if scores[idx] > 0.0:
                 t = tool_by_idx[idx]
                 t_name = t.get("namespacedName") or t.get("name", "")
+                prefix = t_name.split("__", 1)[0] if "__" in t_name else t_name
+
+                # Prevent a single store prefix from starving other relevant stores during comparisons
+                if is_comparison and prefix_counts.get(prefix, 0) >= 3:
+                    continue
+
                 selected_tools.append(t)
                 selected_names.add(t_name)
-                if len(selected_tools) >= top_k:
+                prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+
+                if len(selected_tools) >= effective_top_k:
                     break
+
+        # If comparison had remaining slots, fill with next best
+        if len(selected_tools) < effective_top_k:
+            for idx in ranked_indices:
+                if scores[idx] > 0.0:
+                    t = tool_by_idx[idx]
+                    t_name = t.get("namespacedName") or t.get("name", "")
+                    if t_name not in selected_names:
+                        selected_tools.append(t)
+                        selected_names.add(t_name)
+                        if len(selected_tools) >= effective_top_k:
+                            break
 
         # 5. Smart Fallback if query didn't match enough specific tools (e.g. conversational prompt)
         if len(selected_tools) < 2:
