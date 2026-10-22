@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from ai_config import settings
 from guardrails import guardrails, GuardrailResult
 from prompts import build_system_prompt
+from tool_retriever import tool_retriever, BM25ToolRetriever
 
 # Standard schemas for upstream MCP tools so LLM function calling is guaranteed accurate
 TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -241,6 +242,7 @@ class AgentRunner:
         self.fallback_model = settings.fallback_model
         self.gateway_url = (gateway_url or settings.gateway_url).rstrip("/")
         self.client = AsyncGroq(api_key=self.api_key)
+        self.tool_retriever = tool_retriever
 
     def _gateway_headers(self, api_key: str) -> Dict[str, str]:
         headers = {"X-API-Key": api_key}
@@ -352,14 +354,33 @@ class AgentRunner:
 
         # 2. Tool Discovery from Gateway
         raw_tools = await self._fetch_tools(api_key=api_key)
-        allowed_tool_names = [t["namespacedName"] for t in raw_tools if t.get("isAllowed", True)]
-        groq_tools = self._convert_to_groq_tools(raw_tools)
+        allowed_tools = [t for t in raw_tools if t.get("isAllowed", True)]
+
+        # 2b. BM25 Just-In-Time Tool Retrieval (Token & Latency Optimization)
+        selected_tools, retrieval_metrics = self.tool_retriever.retrieve(
+            query=user_message,
+            tools=allowed_tools,
+            top_k=6,
+        )
+        selected_tool_names = [t["namespacedName"] for t in selected_tools]
+        groq_tools = self._convert_to_groq_tools(selected_tools)
+
+        # Audit transparency: report token reduction metrics in guardrail execution trace
+        guardrail_reports.append(GuardrailResult(
+            passed=True,
+            check_name="BM25 Tool Retrieval",
+            details=(
+                f"Dynamically routed {len(selected_tools)}/{len(allowed_tools)} tools "
+                f"({retrieval_metrics.get('reduction_pct', 0)}% token reduction): "
+                f"{', '.join(selected_tool_names[:4])}"
+            ),
+        ))
 
         # 3. System Prompt Construction
         system_content = build_system_prompt(
             user_name=user_name,
             user_role=user_role,
-            allowed_tools=allowed_tool_names,
+            allowed_tools=selected_tool_names,
         )
 
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system_content}]
