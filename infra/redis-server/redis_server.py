@@ -66,14 +66,19 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 key = args[0]
                 clean_expired(key)
                 if key in DATA:
-                    val = str(DATA[key][0])
-                    writer.write(f"${len(val)}\r\n{val}\r\n".encode())
+                    val_str = str(DATA[key][0])
+                    val_bytes = val_str.encode("utf-8")
+                    writer.write(f"${len(val_bytes)}\r\n".encode("utf-8") + val_bytes + b"\r\n")
                 else:
                     writer.write(b"$-1\r\n")
             elif cmd == "SET":
                 key = args[0]
-                val = int(args[1]) if args[1].isdigit() else 1
-                DATA[key] = (val, None)
+                val = int(args[1]) if args[1].isdigit() else args[1]
+                ttl = None
+                if len(args) >= 4 and args[2].upper() == "EX":
+                    ttl = int(args[3])
+                exp = time.time() + ttl if ttl else None
+                DATA[key] = (val, exp)
                 writer.write(b"+OK\r\n")
             elif cmd == "DEL":
                 key = args[0]

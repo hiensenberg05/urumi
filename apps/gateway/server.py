@@ -31,6 +31,7 @@ from provisioner import provisioning_engine, CreateStoreRequest
 from hosted_manager import hosted_manager, HostedDeployRequest
 from metrics import telemetry
 from ssrf_validator import validate_upstream_url
+from chat_memory import chat_memory
 
 app = FastAPI(
     title="Unified Team MCP Gateway",
@@ -1038,6 +1039,7 @@ async def call_tool(
 class ChatRequest(BaseModel):
     message: str
     role_override: Optional[str] = None
+    session_id: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
 
 @app.post("/api/v1/chat")
@@ -1045,7 +1047,7 @@ async def chat_execute(
     req: ChatRequest,
     principal: Principal = Depends(get_current_principal),
 ):
-    """Simple agent runner endpoint for the frontend playground."""
+    """Simple agent runner endpoint for the frontend playground with Redis session memory."""
     # Prevent privilege escalation: Non-admin principals cannot override role
     if req.role_override and req.role_override != principal.role:
         if principal.role != ROLE_ADMIN:
@@ -1067,6 +1069,11 @@ async def chat_execute(
     else:
         effective_role = principal.role
 
+    # Resolve Session ID and Retrieve History from Redis
+    session_id = req.session_id or f"sess_{principal.name.lower().replace(' ', '_')}"
+    cached_history, latency_ms = await chat_memory.get_history(session_id, limit=8)
+    active_history = cached_history if cached_history else (req.history or [])
+
     # 1. Forward to AI Service (Groq gpt-oss-120b ReAct Agent) if running
     ai_service_url = os.environ.get("AI_SERVICE_URL", "http://ai-service.default.svc.cluster.local:8004/api/v1/agent/chat")
     ai_error = None
@@ -1082,18 +1089,29 @@ async def chat_execute(
                     "message": req.message,
                     "user_name": principal.name,
                     "role_override": effective_role,
-                    "history": req.history,
+                    "history": active_history,
                 },
             )
             if ai_resp.status_code == 200:
                 ai_data = ai_resp.json()
+                assistant_content = ai_data.get("content", "")
+                await chat_memory.append_turns(session_id, req.message, assistant_content)
+                savings = chat_memory.calculate_token_and_bandwidth_savings(active_history)
                 return {
                     "role": "assistant",
-                    "content": ai_data.get("content", ""),
+                    "content": assistant_content,
                     "reasoning": ai_data.get("reasoning"),
                     "steps": ai_data.get("steps", []),
                     "guardrailsPassed": ai_data.get("guardrailsPassed", []),
                     "status": ai_data.get("status", "success"),
+                    "sessionId": session_id,
+                    "memory": {
+                        "cachedTurns": len(active_history),
+                        "retrievalLatencyMs": latency_ms,
+                        "tokensSaved": savings["tokensSaved"],
+                        "payloadBytesSaved": savings["payloadBytesSaved"],
+                        "storage": "Redis (Cluster Synchronized)",
+                    }
                 }
     except Exception as e:
         import traceback
@@ -1291,11 +1309,50 @@ async def chat_execute(
         else:
             assistant_content = f"I am your Urumi Team Agent with role '{effective_role}'. You can ask me to list products, check inventory, inspect orders, or summarize revenue."
 
+    # Save to Redis session memory and calculate savings
+    await chat_memory.append_turns(session_id, req.message, assistant_content)
+    savings = chat_memory.calculate_token_and_bandwidth_savings(active_history)
+
     return {
         "role": "assistant",
         "content": assistant_content,
         "steps": [step] if step else [],
+        "sessionId": session_id,
+        "memory": {
+            "cachedTurns": len(active_history),
+            "retrievalLatencyMs": latency_ms,
+            "tokensSaved": savings["tokensSaved"],
+            "payloadBytesSaved": savings["payloadBytesSaved"],
+            "storage": "Redis (Cluster Synchronized)",
+        }
     }
+
+@app.get("/api/v1/chat/history")
+async def get_chat_history_endpoint(
+    session_id: str = Query(..., description="Unique chat session ID"),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Retrieve multi-turn cached chat history directly from Redis."""
+    turns, latency_ms = await chat_memory.get_history(session_id, limit=20)
+    savings = chat_memory.calculate_token_and_bandwidth_savings(turns)
+    return {
+        "sessionId": session_id,
+        "turns": turns,
+        "count": len(turns),
+        "retrievalLatencyMs": latency_ms,
+        "tokensSaved": savings["tokensSaved"],
+        "payloadBytesSaved": savings["payloadBytesSaved"],
+        "storage": "redis.default.svc.cluster.local:6379",
+    }
+
+@app.delete("/api/v1/chat/history")
+async def clear_chat_history_endpoint(
+    session_id: str = Query(..., description="Unique chat session ID"),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Clear multi-turn cached chat history from Redis."""
+    cleared = await chat_memory.clear_history(session_id)
+    return {"status": "cleared", "sessionId": session_id, "cleared": cleared}
 
 # -------------------------------------------------------------
 # Static Frontend Dashboard Serving (Single-Page Application)

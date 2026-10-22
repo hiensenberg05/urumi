@@ -3,6 +3,8 @@ import time
 import asyncio
 from typing import Dict, Tuple, Optional
 
+from redis_client import redis_client
+
 class TokenBucket:
     def __init__(self, capacity: float, refill_rate: float):
         self.capacity = capacity
@@ -91,15 +93,7 @@ class RateLimiter:
         self._lock = asyncio.Lock()
         
         # Redis distributed backend
-        redis_host = os.environ.get("REDIS_HOST", "redis.default.svc.cluster.local")
-        raw_port = os.environ.get("REDIS_SERVICE_PORT") or os.environ.get("REDIS_PORT", "6379")
-        if "://" in str(raw_port):
-            raw_port = str(raw_port).split(":")[-1]
-        try:
-            redis_port = int(raw_port)
-        except Exception:
-            redis_port = 6379
-        self.redis = SimpleRedisClient(host=redis_host, port=redis_port)
+        self.redis = redis_client
 
     async def check_rate_limit(self, key: str, tokens: float = 1.0) -> Tuple[bool, float]:
         # 1. Distributed Redis Sliding Window Check across all Gateway replicas
