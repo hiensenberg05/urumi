@@ -19,12 +19,14 @@ from upstream_manager import upstream_manager
 
 
 class HostedDeployRequest(BaseModel):
-    id: Optional[str] = Field(None, description="Slug identifier (e.g. 'notifications', 'currency')")
+    id: Optional[str] = Field(None, description="Slug identifier (e.g. 'notifications', 'currency', 'my-custom-mcp')")
     name: str = Field(..., min_length=2, max_length=50, description="Display name of the hosted server")
-    template: str = Field("notifications", description="Template preset: 'notifications', 'currency', 'shipping', or 'custom'")
+    template: str = Field("notifications", description="Template preset: 'notifications', 'currency', 'shipping', 'custom_code', or 'custom_image'")
     image: Optional[str] = Field(None, description="Container image (defaults to urumi/hosted-mcp-suite:v1.0.0)")
     port: Optional[int] = Field(None, description="Service container port (8005-8099)")
     env: Dict[str, str] = Field(default_factory=dict, description="Custom environment variables")
+    custom_code: Optional[str] = Field(None, description="In-browser Python FastMCP tool script to mount & execute")
+    custom_tools: Optional[List[Dict[str, str]]] = Field(None, description="List of declared custom tools")
 
 
 class HostedServerRecord(BaseModel):
@@ -203,9 +205,68 @@ class HostedManager:
         # Preset resolution
         template_info = TEMPLATES_CATALOG.get(req.template, {})
         image = req.image or template_info.get("image", "urumi/hosted-mcp-suite:v1.0.0")
-        port = req.port or template_info.get("port", 8005)
-        tag = template_info.get("tag", "HOSTED")
+        port = req.port or template_info.get("port", 8008 if req.custom_code else 8005)
+        tag = "CUSTOM_CODE" if req.custom_code else ("CUSTOM_IMAGE" if req.template == "custom_image" else template_info.get("tag", "HOSTED"))
         tools = template_info.get("tools", [])
+
+        # Parse tools if custom code is supplied
+        custom_configmap_yaml = ""
+        volume_mount_yaml = ""
+        volumes_yaml = ""
+        container_cmd_yaml = ""
+
+        if req.custom_code:
+            declared = re.findall(r'@mcp\.tool\(name=["\']([^"\']+)["\']\)', req.custom_code)
+            if not declared:
+                declared = re.findall(r'async\s+def\s+([a-zA-Z0-9_]+)\(', req.custom_code)
+            tools = [{"name": t, "description": "Custom user-authored FastMCP tool"} for t in declared]
+            if req.custom_tools:
+                tools.extend(req.custom_tools)
+            if not tools:
+                tools = [{"name": f"custom_{h_id}__execute", "description": "Custom FastMCP tool"}]
+
+            wrapped_code = f'''from typing import Any, Dict, List, Optional
+import os, time, uuid
+from fastmcp import FastMCP
+from starlette.responses import JSONResponse
+from starlette.requests import Request
+import uvicorn
+
+mcp = FastMCP("hosted-{h_id}")
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({{"status": "healthy", "service": "hosted-{h_id}"}})
+
+{req.custom_code}
+
+app = mcp.http_app()
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port={port})
+'''
+            indented_code = "\n".join(["    " + line for line in wrapped_code.splitlines()])
+            custom_configmap_yaml = f"""---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hosted-mcp-{h_id}-code
+  namespace: default
+  labels:
+    app: hosted-mcp-{h_id}
+    app.kubernetes.io/managed-by: urumi-hosted-mcp
+data:
+  server.py: |
+{indented_code}
+"""
+            container_cmd_yaml = '        command: ["python3", "/app/custom_code/server.py"]'
+            volume_mount_yaml = """        volumeMounts:
+        - name: code-volume
+          mountPath: /app/custom_code"""
+            volumes_yaml = f"""      volumes:
+      - name: code-volume
+        configMap:
+          name: hosted-mcp-{h_id}-code"""
 
         # Merge environment variables
         env_vars = dict(template_info.get("env", {}))
@@ -233,8 +294,8 @@ class HostedManager:
 
         # Generate K8s YAML manifest
         env_yaml = "\n".join([f"        - name: {k}\n          value: \"{v}\"" for k, v in env_vars.items()])
-        manifest = f"""
-apiVersion: apps/v1
+        separator = "\n---\n" if custom_configmap_yaml else ""
+        manifest = f"""{custom_configmap_yaml}{separator}apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hosted-mcp-{h_id}
@@ -255,10 +316,13 @@ spec:
         app.kubernetes.io/managed-by: urumi-hosted-mcp
         hosted-mcp-id: {h_id}
     spec:
+{volumes_yaml}
       containers:
       - name: hosted-mcp
         image: {image}
         imagePullPolicy: IfNotPresent
+{container_cmd_yaml}
+{volume_mount_yaml}
         ports:
         - containerPort: {port}
         env:
@@ -387,7 +451,7 @@ spec:
         upstream_manager.unregister_hosted_server(srv_id)
 
         code, _, err = await self._run_kubectl([
-            "delete", "deployment,service", f"hosted-mcp-{h_id}", "--ignore-not-found=true"
+            "delete", "deployment,service,configmap", f"hosted-mcp-{h_id}", f"hosted-mcp-{h_id}-code", "--ignore-not-found=true"
         ])
         if h_id in self.hosted_servers:
             del self.hosted_servers[h_id]
