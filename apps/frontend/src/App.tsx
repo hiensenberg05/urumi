@@ -13,6 +13,7 @@ import { ChatView } from './views/ChatView';
 import { MemberOverviewView } from './views/MemberOverviewView';
 import { ApiKeysView } from './views/ApiKeysView';
 import { StoresView } from './views/StoresView';
+import { TelemetryView } from './views/TelemetryView';
 
 import { 
   MOCK_USERS, 
@@ -207,6 +208,13 @@ export function App() {
               <PermissionsView 
                 tools={tools}
                 onSavePolicies={(updated) => setTools(updated)}
+              />
+            )}
+
+            {currentView === 'telemetry' && (
+              <TelemetryView 
+                currentUser={currentUser}
+                activeApiKey={activeApiKey}
               />
             )}
 

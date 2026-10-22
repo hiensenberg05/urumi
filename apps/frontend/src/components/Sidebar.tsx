@@ -10,7 +10,8 @@ import {
   ExternalLink,
   ChevronDown,
   Layers,
-  Terminal
+  Terminal,
+  Activity
 } from 'lucide-react';
 import { User } from '../types';
 
@@ -32,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'servers', label: 'MCP Servers', icon: Server, badge: '3' },
     { id: 'stores', label: 'Stores Provisioner', icon: Store, badge: 'K8s', isHighlight: true },
     { id: 'permissions', label: 'Tool Permissions', icon: ShieldCheck, hasDot: true },
+    { id: 'telemetry', label: 'Telemetry & SRE', icon: Activity, badge: 'LIVE', isHighlight: true },
     { id: 'keys', label: 'Team & API Keys', icon: KeyRound },
     { id: 'audit', label: 'Audit Logs', icon: ScrollText },
     { id: 'chat', label: 'AI Chat', icon: Bot, isHighlight: true },

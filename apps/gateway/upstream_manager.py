@@ -5,6 +5,7 @@ import httpx
 from fastmcp import Client
 from config import settings
 from rbac import get_tool_risk
+from metrics import telemetry
 
 class UpstreamServer:
     def __init__(
@@ -28,6 +29,7 @@ class UpstreamServer:
         self.last_checked = time.strftime("%Y-%m-%d %H:%M:%S UTC")
         self.ping_ms = 12.0
         self.uptime_pct = 99.9
+        self.last_error_reason: Optional[str] = None
 
     async def check_health(self) -> bool:
         start = time.monotonic()
@@ -35,15 +37,28 @@ class UpstreamServer:
             async with httpx.AsyncClient(timeout=3.0) as http:
                 resp = await http.get(self.health_url)
                 self.ping_ms = round((time.monotonic() - start) * 1000, 1)
+                self.last_checked = time.strftime("%Y-%m-%d %H:%M:%S UTC")
                 if resp.status_code == 200:
                     self.status = "Connected"
-                    self.last_checked = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    self.last_error_reason = None
                     return True
                 else:
-                    self.status = "Unreachable"
+                    self.status = "Degraded"
+                    self.last_error_reason = f"Health probe returned HTTP {resp.status_code}."
                     return False
-        except Exception:
+        except Exception as e:
+            self.ping_ms = round((time.monotonic() - start) * 1000, 1)
+            self.last_checked = time.strftime("%Y-%m-%d %H:%M:%S UTC")
             self.status = "Unreachable"
+            err_str = str(e).lower()
+            if "timeout" in err_str:
+                self.last_error_reason = f"CONNECTION_TIMEOUT: Health check exceeded 3.0s timeout to {self.health_url}"
+            elif "connect" in err_str or "refused" in err_str:
+                self.last_error_reason = f"CONNECTION_REFUSED: Unable to reach {self.health_url}. Pod or port offline."
+            elif "dns" in err_str or "name or service not known" in err_str:
+                self.last_error_reason = f"DNS_RESOLUTION_FAILED: Host in {self.health_url} could not be resolved by cluster CoreDNS."
+            else:
+                self.last_error_reason = f"UNREACHABLE: {str(e)}"
             return False
 
     async def refresh_tools(self) -> List[Dict[str, Any]]:
@@ -251,12 +266,18 @@ class UpstreamManager:
                 all_tools.extend(srv.tools)
         return all_tools
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], user_role: Optional[str] = None) -> Any:
         srv = self.get_server_for_tool(tool_name)
         if not srv:
             raise ValueError(f"No upstream MCP server found for tool '{tool_name}'")
         if srv.status == "Disabled":
-            raise ValueError(f"Upstream server '{srv.name}' is currently disabled.")
+            raise ValueError(f"Upstream server '{srv.name}' is currently disabled by administrator.")
+
+        # Circuit Breaker Check
+        cb = telemetry.get_circuit_breaker_status(srv.id)
+        if cb.get("state") == "OPEN":
+            reason = cb.get("reason", "repeated upstream failures")
+            raise ConnectionError(f"CIRCUIT_BREAKER_OPEN: Server '{srv.name}' is temporarily isolated ({reason}). Cooldown active.")
 
         target_tool = tool_name
         for t in srv.tools:
@@ -264,12 +285,50 @@ class UpstreamManager:
                 target_tool = t.get("originalName", tool_name)
                 break
 
-        async with Client(srv.endpoint_url, timeout=15.0) as client:
-            res = await client.call_tool(target_tool, arguments)
-            if hasattr(res, "data"):
-                return res.data
-            elif hasattr(res, "content"):
-                return res.content
-            return res
+        start = time.monotonic()
+        try:
+            async with Client(srv.endpoint_url, timeout=15.0) as client:
+                res = await client.call_tool(target_tool, arguments)
+                duration_ms = round((time.monotonic() - start) * 1000, 1)
+                telemetry.record_tool_call(
+                    server_id=srv.id,
+                    tool_name=tool_name,
+                    duration_ms=duration_ms,
+                    status="200 OK",
+                    user_role=user_role,
+                )
+                if hasattr(res, "data"):
+                    return res.data
+                elif hasattr(res, "content"):
+                    return res.content
+                return res
+        except Exception as e:
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
+            err_str = str(e).lower()
+            category = "UPSTREAM_FAILURE"
+            detail = str(e)
+            if "timeout" in err_str:
+                category = "CONNECTION_TIMEOUT"
+                detail = f"Upstream service '{srv.name}' exceeded 15.0s execution timeout."
+            elif "connect" in err_str or "refused" in err_str:
+                category = "CONNECTION_REFUSED"
+                detail = f"TCP Connection refused at '{srv.endpoint_url}'. Pod or port is unreachable."
+            elif "dns" in err_str or "name or service not known" in err_str:
+                category = "DNS_RESOLUTION_FAILED"
+                detail = f"Cluster CoreDNS failed to resolve hostname for '{srv.endpoint_url}'."
+            elif "500" in err_str:
+                category = "UPSTREAM_500_ERROR"
+                detail = f"Upstream service '{srv.name}' returned HTTP 500 Internal Error."
+
+            telemetry.record_tool_call(
+                server_id=srv.id,
+                tool_name=tool_name,
+                duration_ms=duration_ms,
+                status="500 Error",
+                error_category=category,
+                error_detail=detail,
+                user_role=user_role,
+            )
+            raise e
 
 upstream_manager = UpstreamManager()

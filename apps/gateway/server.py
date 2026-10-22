@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, Header, Query, Request, status
+from fastapi import FastAPI, Depends, HTTPException, Header, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,7 @@ from rate_limiter import RateLimiter
 from audit_logger import audit_logger
 from upstream_manager import upstream_manager
 from provisioner import provisioning_engine, CreateStoreRequest
+from metrics import telemetry
 
 app = FastAPI(
     title="Unified Team MCP Gateway",
@@ -88,7 +89,7 @@ async def get_current_principal(
 
     if not token:
         # Check if caller is requesting health or public endpoint
-        if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+        if request.url.path in ("/health", "/", "/docs", "/openapi.json", "/metrics"):
             return Principal(key="anonymous", name="Anonymous", role="public", scope="none")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -111,6 +112,7 @@ async def get_current_principal(
     if key_info.get("role") != ROLE_ADMIN:
         allowed, retry_after = await rate_limiter.check_rate_limit(token)
         if not allowed:
+            telemetry.record_rate_limit(token)
             audit_logger.log_event(
                 principal=key_info["name"],
                 user_role=key_info["role"],
@@ -415,6 +417,24 @@ async def get_stats(principal: Principal = Depends(get_current_principal)):
     return stats
 
 # -------------------------------------------------------------
+# Enterprise Observability & Prometheus Metrics Endpoints
+# -------------------------------------------------------------
+@app.get("/metrics")
+async def get_prometheus_metrics():
+    """OpenMetrics / Prometheus exposition endpoint for cluster scraping."""
+    content = telemetry.get_prometheus_metrics(
+        upstream_manager.servers, upstream_manager.get_all_tools()
+    )
+    return Response(content=content, media_type="text/plain; version=0.0.4")
+
+@app.get("/api/v1/telemetry")
+async def get_telemetry_report(principal: Principal = Depends(get_current_principal)):
+    """High-resolution SRE telemetry with per-server percentiles and circuit breakers."""
+    return telemetry.get_telemetry_json(
+        upstream_manager.servers, upstream_manager.get_all_tools()
+    )
+
+# -------------------------------------------------------------
 # Tool Execution API with RBAC Enforcement & Telemetry
 # -------------------------------------------------------------
 def validate_tool_arguments(tool_name: str, args: Dict[str, Any]) -> Optional[str]:
@@ -478,6 +498,7 @@ async def call_tool(
 
     # 1. Enforce RBAC
     if not is_tool_allowed(principal.role, req.tool):
+        telemetry.record_rbac_violation(principal.role, req.tool)
         duration_ms = (time.monotonic() - start_time) * 1000
         audit_logger.log_event(
             principal=principal.name,
@@ -524,7 +545,7 @@ async def call_tool(
     target_server_name = srv.name if srv else "unknown"
 
     try:
-        result = await upstream_manager.execute_tool(req.tool, req.arguments)
+        result = await upstream_manager.execute_tool(req.tool, req.arguments, user_role=principal.role)
         duration_ms = (time.monotonic() - start_time) * 1000
         audit_logger.log_event(
             principal=principal.name,
@@ -664,7 +685,7 @@ async def chat_execute(
                 }]
             }
         try:
-            res = await upstream_manager.execute_tool(tool_to_call, {"sku": "SKU-1001", "delta": 5, "reason": "Customer return"})
+            res = await upstream_manager.execute_tool(tool_to_call, {"sku": "SKU-1001", "delta": 5, "reason": "Customer return"}, user_role=effective_role)
             assistant_content = f"Successfully adjusted stock for SKU-1001 by +5. New stock: {res.get('new_quantity', 'updated')}."
             step = {
                 "stepNumber": 1,
@@ -706,7 +727,7 @@ async def chat_execute(
                 }]
             }
         try:
-            res = await upstream_manager.execute_tool(tool_to_call, {"sku": "SKU-1004", "quantity": 500})
+            res = await upstream_manager.execute_tool(tool_to_call, {"sku": "SKU-1004", "quantity": 500}, user_role=effective_role)
             assistant_content = f"Successfully updated stock for SKU-1004 to 500 units."
             step = {
                 "stepNumber": 1,
@@ -737,7 +758,7 @@ async def chat_execute(
             }
         
         try:
-            res = await upstream_manager.execute_tool(tool_to_call, {"per_page": 5})
+            res = await upstream_manager.execute_tool(tool_to_call, {"per_page": 5}, user_role=effective_role)
             prod_names = ", ".join(p.get("name", "Unknown") for p in res[:4]) if isinstance(res, list) else str(res)
             assistant_content = f"Here are the latest catalog products: {prod_names}."
             step = {
@@ -768,7 +789,7 @@ async def chat_execute(
                 }]
             }
         try:
-            res = await upstream_manager.execute_tool(tool_to_call, {"threshold": 10})
+            res = await upstream_manager.execute_tool(tool_to_call, {"threshold": 10}, user_role=effective_role)
             assistant_content = f"Found {len(res)} items at or below low stock threshold."
             step = {
                 "stepNumber": 1,
@@ -798,7 +819,7 @@ async def chat_execute(
                 }]
             }
         try:
-            res = await upstream_manager.execute_tool(tool_to_call, {})
+            res = await upstream_manager.execute_tool(tool_to_call, {}, user_role=effective_role)
             sales = res.get("gross_sales", 0)
             cnt = res.get("orders_count", 0)
             assistant_content = f"Today's total gross sales are ${sales} across {cnt} orders."

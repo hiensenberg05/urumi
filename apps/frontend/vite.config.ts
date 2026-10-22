@@ -15,6 +15,13 @@ export default defineConfig({
           Host: 'gateway.local',
         },
       },
+      '/metrics': {
+        target: 'http://127.0.0.1',
+        changeOrigin: true,
+        headers: {
+          Host: 'gateway.local',
+        },
+      },
       '/mcp': {
         target: 'http://127.0.0.1',
         changeOrigin: true,

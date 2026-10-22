@@ -130,3 +130,69 @@ export interface StoreTenant {
   category?: string;
   errorMessage?: string;
 }
+
+export interface ServerTelemetryRow {
+  id: string;
+  name: string;
+  tag: string;
+  status: ServerStatus;
+  endpointUrl: string;
+  circuitBreaker: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  circuitTrips: number;
+  totalCalls: number;
+  errorCount: number;
+  errorRatePct: number;
+  p50LatencyMs: number;
+  p95LatencyMs: number;
+  p99LatencyMs: number;
+  avgLatencyMs: number;
+  lastError?: {
+    timestamp: string;
+    tool: string;
+    category: string;
+    detail: string;
+    status: string;
+  } | null;
+}
+
+export interface ToolTelemetryRow {
+  name: string;
+  serverName: string;
+  totalCalls: number;
+  errorCount: number;
+  errorRatePct: number;
+  p50LatencyMs: number;
+  p95LatencyMs: number;
+  avgLatencyMs: number;
+}
+
+export interface TelemetrySummary {
+  uptimeSeconds: number;
+  totalInvocations: number;
+  successfulInvocations: number;
+  failedInvocations: number;
+  errorRatePct: number;
+  successRatePct: number;
+  rbacViolations: number;
+  rateLimitBlocks: number;
+  activeServers: number;
+  totalServers: number;
+  totalTools: number;
+  latency: {
+    p50: number;
+    p90: number;
+    p95: number;
+    p99: number;
+    avg: number;
+    min: number;
+    max: number;
+  };
+}
+
+export interface TelemetryReport {
+  summary: TelemetrySummary;
+  servers: ServerTelemetryRow[];
+  topTools: ToolTelemetryRow[];
+  roleDistribution: Record<string, number>;
+}
+
