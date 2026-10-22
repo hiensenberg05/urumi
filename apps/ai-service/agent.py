@@ -356,19 +356,44 @@ class AgentRunner:
         raw_tools = await self._fetch_tools(api_key=api_key)
         allowed_tools = [t for t in raw_tools if t.get("isAllowed", True)]
 
-        # 2b. BM25 Just-In-Time Tool Retrieval (Token & Latency Optimization)
-        # Combine user message with recent conversation context for accurate multi-turn tool routing
-        context_query = user_message
-        if conversation_history:
-            recent_turns = [t.get("content", "") for t in conversation_history[-4:] if isinstance(t, dict) and t.get("content")]
-            if recent_turns:
-                context_query = f"{' '.join(recent_turns)} {user_message}"
-
-        selected_tools, retrieval_metrics = self.tool_retriever.retrieve(
-            query=context_query,
+        # 2b. Dual-Track BM25 Tool Retrieval (Guarantees Current Intent + Conversational Context)
+        # Track 1: Retrieve tools directly matching the current user message (top_k=8)
+        direct_tools, metrics_direct = self.tool_retriever.retrieve(
+            query=user_message,
             tools=allowed_tools,
-            top_k=6,
+            top_k=8,
         )
+
+        # Track 2: If multi-turn history exists, retrieve tools matching recent conversational context (top_k=4)
+        history_tools = []
+        if conversation_history:
+            recent_context = " ".join([
+                str(t.get("content", ""))[:200]
+                for t in conversation_history[-2:]
+                if isinstance(t, dict) and t.get("content")
+            ])
+            if recent_context.strip():
+                history_tools, _ = self.tool_retriever.retrieve(
+                    query=recent_context,
+                    tools=allowed_tools,
+                    top_k=4,
+                )
+
+        # Merge and deduplicate while strictly prioritizing immediate user message
+        tool_map = {}
+        for t in direct_tools + history_tools:
+            name = t.get("namespacedName")
+            if name and name not in tool_map:
+                tool_map[name] = t
+
+        # If user message is ultra-short or few tools matched, ensure essential core tools are available
+        if len(user_message.strip()) <= 15 or len(tool_map) < 4:
+            for t in allowed_tools:
+                name = t.get("namespacedName", "")
+                if name in ("inventory__check_stock", "woocommerce__list_orders", "woocommerce__list_products") and name not in tool_map:
+                    tool_map[name] = t
+
+        selected_tools = list(tool_map.values())
         selected_tool_names = [t["namespacedName"] for t in selected_tools]
         groq_tools = self._convert_to_groq_tools(selected_tools)
 
@@ -377,9 +402,8 @@ class AgentRunner:
             passed=True,
             check_name="BM25 Tool Retrieval",
             details=(
-                f"Dynamically routed {len(selected_tools)}/{len(allowed_tools)} tools "
-                f"({retrieval_metrics.get('reduction_pct', 0)}% token reduction): "
-                f"{', '.join(selected_tool_names[:4])}"
+                f"Dynamically routed {len(selected_tools)}/{len(allowed_tools)} tools: "
+                f"{', '.join(selected_tool_names[:5])}"
             ),
         ))
 
