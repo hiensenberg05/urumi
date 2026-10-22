@@ -196,3 +196,37 @@ export interface TelemetryReport {
   roleDistribution: Record<string, number>;
 }
 
+export interface HostedToolInfo {
+  name: string;
+  description: string;
+}
+
+export interface HostedMcpServer {
+  id: string;
+  name: string;
+  template: string;
+  tag: string;
+  image: string;
+  port: number;
+  replicas: number;
+  status: 'Provisioning' | 'Running' | 'Sleeping' | 'Failed';
+  endpointUrl: string;
+  healthUrl: string;
+  toolsCount: number;
+  tools: HostedToolInfo[];
+  createdAt: string;
+  errorMessage?: string | null;
+}
+
+export interface HostedTemplate {
+  id: string;
+  name: string;
+  tag: string;
+  description: string;
+  image: string;
+  port: number;
+  env: Record<string, string>;
+  tools: HostedToolInfo[];
+}
+
+

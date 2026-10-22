@@ -242,6 +242,53 @@ class UpstreamManager:
             return True
         return False
 
+    def register_hosted_server(
+        self,
+        server_id: str,
+        name: str,
+        tag: str,
+        endpoint_url: str,
+        health_url: str,
+        tools_list: List[Dict[str, str]],
+    ) -> UpstreamServer:
+        """Register a dynamic on-demand hosted MCP server pod."""
+        server = UpstreamServer(
+            server_id=server_id,
+            name=name,
+            tag=tag,
+            endpoint_url=endpoint_url,
+            health_url=health_url,
+            prefix=f"{server_id}__",
+        )
+        server.tools = [
+            {
+                "id": f"tool_{t['name']}",
+                "namespacedName": t["name"],
+                "originalName": t["name"],
+                "serverId": server_id,
+                "serverName": name,
+                "description": t.get("description", "Hosted on-demand MCP tool"),
+                "riskProfile": (
+                    "Low (Read-only)" if any(k in t["name"] for k in ["get", "list", "track", "convert"])
+                    else "High (Operational write)"
+                ),
+                "rateLimit": "60/min",
+                "policy": "ALLOW",
+                "effectiveRule": "Hosted Pod Default",
+                "isAllowed": True,
+            }
+            for t in tools_list
+        ]
+        self.servers[server_id] = server
+        return server
+
+    def unregister_hosted_server(self, server_id: str) -> bool:
+        """Remove a hosted MCP server pod from active gateway registry."""
+        if server_id in self.servers:
+            del self.servers[server_id]
+            return True
+        return False
+
     def toggle_server_status(self, server_id: str) -> Optional[UpstreamServer]:
         srv = self.servers.get(server_id)
         if not srv:

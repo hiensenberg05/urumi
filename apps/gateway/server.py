@@ -25,6 +25,7 @@ from rate_limiter import RateLimiter
 from audit_logger import audit_logger
 from upstream_manager import upstream_manager
 from provisioner import provisioning_engine, CreateStoreRequest
+from hosted_manager import hosted_manager, HostedDeployRequest
 from metrics import telemetry
 
 app = FastAPI(
@@ -207,6 +208,7 @@ async def toggle_server(
 @app.on_event("startup")
 async def on_startup():
     asyncio.create_task(provisioning_engine.reconcile_existing_stores())
+    asyncio.create_task(hosted_manager.reconcile_existing())
 
 # -------------------------------------------------------------
 # Multi-Store Tenant Management API
@@ -278,6 +280,106 @@ async def retry_store(
     if not tenant:
         raise HTTPException(status_code=404, detail=f"Store '{store_id}' not found.")
     return tenant
+
+# -------------------------------------------------------------
+# Hosted MCP Servers on Kubernetes (Differentiator #5)
+# -------------------------------------------------------------
+@app.get("/api/v1/hosted-servers/templates")
+async def list_hosted_templates(principal: Principal = Depends(get_current_principal)):
+    return hosted_manager.get_templates()
+
+@app.get("/api/v1/hosted-servers")
+async def list_hosted_servers(principal: Principal = Depends(get_current_principal)):
+    return hosted_manager.list_hosted_servers()
+
+@app.post("/api/v1/hosted-servers")
+async def deploy_hosted_server(
+    req: HostedDeployRequest,
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can deploy hosted MCP server pods.",
+        )
+    try:
+        rec = await hosted_manager.deploy_server(req)
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name="hosted_server_deploy",
+            target_server=rec.name,
+            status="202 Provisioning",
+            duration_ms=1.0,
+        )
+        return rec
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Deployment error: {str(e)}")
+
+@app.post("/api/v1/hosted-servers/{server_id}/scale")
+async def scale_hosted_server(
+    server_id: str,
+    replicas: int = Query(..., ge=0, le=1),
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can scale hosted MCP servers.",
+        )
+    try:
+        rec = await hosted_manager.scale_server(server_id, replicas)
+        action = "wake" if replicas > 0 else "sleep"
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name=f"hosted_server_{action}",
+            target_server=rec.name,
+            status=f"200 {rec.status}",
+            duration_ms=1.0,
+        )
+        return rec
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/hosted-servers/{server_id}/logs")
+async def get_hosted_server_logs(
+    server_id: str,
+    tail: int = Query(100, ge=10, le=500),
+    principal: Principal = Depends(get_current_principal),
+):
+    logs = await hosted_manager.get_logs(server_id, tail=tail)
+    return {"id": server_id, "logs": logs}
+
+@app.delete("/api/v1/hosted-servers/{server_id}")
+async def delete_hosted_server(
+    server_id: str,
+    principal: Principal = Depends(get_current_principal),
+):
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete hosted MCP servers.",
+        )
+    try:
+        await hosted_manager.delete_server(server_id)
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name="hosted_server_teardown",
+            target_server=server_id,
+            status="200 Deleted",
+            duration_ms=1.0,
+        )
+        return {"status": "deleted", "id": server_id}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------------------------------------------
 # Tools & RBAC Discovery API

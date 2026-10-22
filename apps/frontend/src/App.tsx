@@ -194,6 +194,7 @@ export function App() {
                 servers={servers}
                 onToggleServerStatus={handleToggleServerStatus}
                 onAddServer={() => setIsAddServerModalOpen(true)}
+                activeApiKey={activeApiKey}
               />
             )}
 
