@@ -245,7 +245,7 @@ class AgentRunner:
         self.tool_retriever = tool_retriever
 
     def _gateway_headers(self, api_key: str) -> Dict[str, str]:
-        headers = {"X-API-Key": api_key}
+        headers = {"X-API-Key": api_key, "Authorization": f"Bearer {api_key}"}
         if settings.gateway_host_header:
             headers["Host"] = settings.gateway_host_header
         elif any(h in self.gateway_url for h in ["172.18.", "localhost", "127.0.0.1"]):
@@ -357,8 +357,15 @@ class AgentRunner:
         allowed_tools = [t for t in raw_tools if t.get("isAllowed", True)]
 
         # 2b. BM25 Just-In-Time Tool Retrieval (Token & Latency Optimization)
+        # Combine user message with recent conversation context for accurate multi-turn tool routing
+        context_query = user_message
+        if conversation_history:
+            recent_turns = [t.get("content", "") for t in conversation_history[-4:] if isinstance(t, dict) and t.get("content")]
+            if recent_turns:
+                context_query = f"{' '.join(recent_turns)} {user_message}"
+
         selected_tools, retrieval_metrics = self.tool_retriever.retrieve(
-            query=user_message,
+            query=context_query,
             tools=allowed_tools,
             top_k=6,
         )
@@ -385,7 +392,12 @@ class AgentRunner:
 
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system_content}]
         if conversation_history:
-            messages.extend(conversation_history)
+            for turn in conversation_history:
+                if isinstance(turn, dict):
+                    r = turn.get("role")
+                    c = turn.get("content")
+                    if r in ("user", "assistant") and c:
+                        messages.append({"role": r, "content": str(c)})
         messages.append({"role": "user", "content": user_message})
 
         executed_steps: List[ToolStep] = []

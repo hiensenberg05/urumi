@@ -15,13 +15,15 @@ import {
   ArrowRight,
   Lock,
   Shield,
-  Filter
+  Filter,
+  RotateCcw
 } from 'lucide-react';
 import { ChatMessage, User, McpServer, ServerTool } from '../types';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 
 interface ChatViewProps {
   currentUser: User;
+  activeApiKey?: string;
   servers?: McpServer[];
   tools?: ServerTool[];
   onSendMessage?: (content: string) => void;
@@ -29,6 +31,7 @@ interface ChatViewProps {
 
 export const ChatView: React.FC<ChatViewProps> = ({
   currentUser,
+  activeApiKey,
   servers = [],
   tools = [],
   onSendMessage
@@ -133,17 +136,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onSendMessage(text);
     }
 
-    const apiKey = currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'support-key-urumi-2026';
+    // Build multi-turn in-session memory history from prior messages
+    const historyPayload = messages
+      .filter(m => m.content && m.content.trim().length > 0)
+      .map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+    const tokenToUse = activeApiKey || (currentUser.role === 'ADMIN' ? 'admin-key-urumi-2026' : 'support-key-urumi-2026');
 
     fetch('/api/v1/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
+        'Authorization': `Bearer ${tokenToUse}`,
+        'X-API-Key': tokenToUse,
       },
       body: JSON.stringify({
         message: text,
         role_override: effectiveRole,
+        history: historyPayload.slice(-8), // Send recent 8 conversational turns for contextual awareness
       }),
     })
       .then(res => {
@@ -252,6 +265,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* In-Session Conversation Memory Indicator */}
+            <div 
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-950/40 border border-blue-800/50 text-[10px] font-mono text-blue-300"
+              title="In-Session Conversation Memory: AI preserves multi-turn context"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+              <span>Memory: {messages.length} msgs</span>
+            </div>
+
+            {/* Clear Memory Button */}
+            {messages.length > 0 && (
+              <button
+                onClick={() => setMessages([])}
+                title="Clear conversation memory and start a fresh session"
+                className="p-1 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-rose-400 border border-slate-700/60 transition flex items-center gap-1 px-2 text-[10px] font-mono"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset</span>
+              </button>
+            )}
+
             {/* Model Selector */}
             <select
               value={selectedModel}

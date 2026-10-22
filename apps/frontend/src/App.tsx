@@ -255,6 +255,7 @@ export function App() {
             {currentView === 'chat' && (
               <ChatView 
                 currentUser={currentUser}
+                activeApiKey={activeApiKey}
                 servers={servers}
                 tools={tools}
               />

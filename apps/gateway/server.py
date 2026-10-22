@@ -979,7 +979,10 @@ async def chat_execute(
         async with httpx.AsyncClient(timeout=90.0) as http:
             ai_resp = await http.post(
                 ai_service_url,
-                headers={"X-API-Key": principal.key},
+                headers={
+                    "X-API-Key": principal.key,
+                    "Authorization": f"Bearer {principal.key}",
+                },
                 json={
                     "message": req.message,
                     "user_name": principal.name,
