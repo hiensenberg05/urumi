@@ -134,22 +134,8 @@ export function App() {
 
   // Add new server
   const handleAddServer = (newServer: McpServer) => {
-    setServers(prev => [...prev, newServer]);
-    // Also add discovered tools into tools catalog
-    const newTools: ServerTool[] = newServer.discoveredTools.map(name => ({
-      id: `tool-${Date.now()}-${name}`,
-      namespacedName: name,
-      originalName: name.split('__')[1] || name,
-      serverId: newServer.id,
-      serverName: newServer.name,
-      description: `Discovered RPC capability from ${newServer.name}.`,
-      riskProfile: 'Low (Read-only)',
-      rateLimit: '30 req/min',
-      policy: 'ALLOW',
-      effectiveRule: 'Allowed via Role: Member',
-      isAllowed: true
-    }));
-    setTools(prev => [...prev, ...newTools]);
+    setServers(prev => [newServer, ...prev.filter(s => s.id !== newServer.id)]);
+    fetchLivePlatformState();
   };
 
   // Revoke API key (satisfies rubric requirement: "Revoke user B's key. Their next call is rejected.")
@@ -307,6 +293,7 @@ export function App() {
         isOpen={isAddServerModalOpen}
         onClose={() => setIsAddServerModalOpen(false)}
         onAddServer={handleAddServer}
+        activeApiKey={activeApiKey}
       />
 
       {/* Enterprise OAuth 2.0 & JWT Identity Modal */}

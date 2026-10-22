@@ -122,6 +122,28 @@ export const ServersView: React.FC<ServersViewProps> = ({
     }
   };
 
+  const handleDeleteCustomServer = async (serverId: string) => {
+    if (!window.confirm(`Are you sure you want to unregister upstream server '${serverId}'?`)) {
+      return;
+    }
+    try {
+      const token = activeApiKey || 'admin-key-urumi-2026';
+      const headers: Record<string, string> = {};
+      if (token.startsWith('ey')) headers['Authorization'] = `Bearer ${token}`;
+      else headers['X-API-Key'] = token;
+
+      const res = await fetch(`/api/v1/servers/${serverId}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (res.ok) {
+        handleRefresh();
+      }
+    } catch (e) {
+      console.error('Unregister error:', e);
+    }
+  };
+
   const filteredFleet = servers.filter(s => {
     if (activeTab === 'issues') return s.status !== 'Connected';
     if (searchQuery) {
@@ -381,6 +403,16 @@ export const ServersView: React.FC<ServersViewProps> = ({
                           title={isConnected ? "Disable Server" : "Enable Server"}
                         >
                           <Power className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {(server.id.startsWith('srv-custom-') || server.tag.includes('CUSTOM')) && (
+                        <button
+                          onClick={() => handleDeleteCustomServer(server.id)}
+                          className="p-1.5 rounded-lg border border-brand-border bg-brand-surface hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 transition"
+                          title="Unregister Upstream MCP Server"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>

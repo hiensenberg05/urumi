@@ -30,6 +30,7 @@ from upstream_manager import upstream_manager
 from provisioner import provisioning_engine, CreateStoreRequest
 from hosted_manager import hosted_manager, HostedDeployRequest
 from metrics import telemetry
+from ssrf_validator import validate_upstream_url
 
 app = FastAPI(
     title="Unified Team MCP Gateway",
@@ -247,7 +248,7 @@ async def list_servers(principal: Principal = Depends(get_current_principal)):
             "toolsCount": len(s.tools),
             "discoveredTools": [t["namespacedName"] for t in s.tools],
             "lastChecked": s.last_checked,
-            "authType": "API Key / RBAC",
+            "authType": getattr(s, "auth_type", "API Key / RBAC"),
         })
     return result
 
@@ -274,6 +275,100 @@ async def toggle_server(
         duration_ms=1.0,
     )
     return {"id": srv.id, "name": srv.name, "status": srv.status}
+
+class RegisterServerRequest(BaseModel):
+    name: str
+    endpoint_url: str
+    auth_type: str = "none"
+    auth_token: Optional[str] = None
+    transport: str = "http"
+    tag: Optional[str] = "CUSTOM_UPSTREAM"
+
+@app.post("/api/v1/servers", status_code=status.HTTP_201_CREATED)
+async def register_server(
+    req: RegisterServerRequest,
+    principal: Principal = Depends(get_current_principal),
+):
+    """Register an external upstream MCP server with Backend SSRF Protection."""
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can register upstream MCP servers.",
+        )
+
+    # 1. Backend SSRF Validation (OWASP A10 / CWE-918)
+    is_safe, error_reason = validate_upstream_url(req.endpoint_url)
+    if not is_safe:
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name="ssrf_blocked_server_register",
+            target_server="ssrf_perimeter",
+            status="400 Bad Request",
+            duration_ms=1.0,
+            params={"endpoint_url": req.endpoint_url},
+            policy_rule_detail=f"Backend SSRF Protection Blocked: {error_reason}",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_reason,
+        )
+
+    # 2. Register Server in upstream_manager
+    srv = await upstream_manager.register_custom_server(
+        name=req.name,
+        endpoint_url=req.endpoint_url,
+        auth_type=req.auth_type,
+        auth_token=req.auth_token,
+        transport=req.transport,
+        tag=req.tag or "CUSTOM_UPSTREAM",
+    )
+
+    audit_logger.log_event(
+        principal=principal.name,
+        user_role=principal.role,
+        tool_name="server_register",
+        target_server=srv.name,
+        status="201 Registered",
+        duration_ms=2.0,
+        params={"server_id": srv.id, "endpoint_url": srv.endpoint_url},
+    )
+
+    return {
+        "id": srv.id,
+        "name": srv.name,
+        "tag": srv.tag,
+        "endpointUrl": srv.endpoint_url,
+        "status": srv.status,
+        "transport": srv.transport,
+        "toolsCount": len(srv.tools),
+        "discoveredTools": [t["namespacedName"] for t in srv.tools],
+    }
+
+@app.delete("/api/v1/servers/{server_id}")
+async def unregister_server_endpoint(
+    server_id: str,
+    principal: Principal = Depends(get_current_principal),
+):
+    """Unregister an upstream MCP server."""
+    if principal.role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can remove upstream servers.",
+        )
+    ok = upstream_manager.unregister_server(server_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Server '{server_id}' not found.")
+    
+    audit_logger.log_event(
+        principal=principal.name,
+        user_role=principal.role,
+        tool_name="server_unregister",
+        target_server=server_id,
+        status="200 Deleted",
+        duration_ms=1.0,
+    )
+    return {"status": "deleted", "id": server_id}
 
 @app.on_event("startup")
 async def on_startup():

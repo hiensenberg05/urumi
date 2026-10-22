@@ -47,6 +47,11 @@ class GatewaySettings(BaseSettings):
             "role": "inventory_manager",
             "scope": "read:write:inventory",
         },
+        "ratelimit-probe-key-2026": {
+            "name": "Distributed Rate Limit Tester Key",
+            "role": "support_rep",
+            "scope": "read:tools",
+        },
         "analyst-key-urumi-2026": {
             "name": "Financial Analyst Key",
             "role": "analyst",

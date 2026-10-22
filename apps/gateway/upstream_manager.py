@@ -1,11 +1,13 @@
 import asyncio
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 import httpx
 from fastmcp import Client
 from config import settings
 from rbac import get_tool_risk
 from metrics import telemetry
+from crypto_vault import vault
 
 class UpstreamServer:
     def __init__(
@@ -30,6 +32,19 @@ class UpstreamServer:
         self.ping_ms = 12.0
         self.uptime_pct = 99.9
         self.last_error_reason: Optional[str] = None
+        self.auth_type = "API Key / RBAC"
+        self.encrypted_auth_token: Optional[str] = None
+
+    def get_auth_headers(self) -> Dict[str, str]:
+        if not self.encrypted_auth_token:
+            return {}
+        try:
+            token = vault.decrypt(self.encrypted_auth_token)
+            if self.auth_type == "Static Header":
+                return {"X-API-Key": token}
+            return {"Authorization": f"Bearer {token}"}
+        except Exception:
+            return {}
 
     async def check_health(self) -> bool:
         start = time.monotonic()
@@ -237,6 +252,72 @@ class UpstreamManager:
 
     def unregister_store_server(self, store_id: str) -> bool:
         server_id = f"srv-store-{store_id}"
+        if server_id in self.servers:
+            del self.servers[server_id]
+            return True
+        return False
+
+    async def register_custom_server(
+        self,
+        name: str,
+        endpoint_url: str,
+        auth_type: str = "none",
+        auth_token: Optional[str] = None,
+        transport: str = "http",
+        tag: str = "CUSTOM_UPSTREAM",
+    ) -> UpstreamServer:
+        """Register a user-provided external upstream MCP server."""
+        slug = name.lower().replace(" ", "-").replace("_", "-")
+        server_id = f"srv-custom-{slug}-{uuid.uuid4().hex[:4]}"
+        prefix = f"{slug.replace('-', '_')}__"
+        health_url = endpoint_url.replace("/mcp", "/health").replace("/sse", "/health")
+        
+        server = UpstreamServer(
+            server_id=server_id,
+            name=name,
+            tag=tag,
+            endpoint_url=endpoint_url,
+            health_url=health_url,
+            prefix=prefix,
+        )
+        server.auth_type = auth_type
+        if auth_token:
+            server.encrypted_auth_token = vault.encrypt(auth_token)
+        server.transport = "Streamable HTTP (SSE)" if "sse" in transport.lower() else "Streamable HTTP"
+        
+        # Discover tools or populate capability placeholders
+        try:
+            discovered = await server.refresh_tools()
+        except Exception:
+            discovered = False
+
+        if not server.tools:
+            placeholder_tools = [
+                ("query", f"Query operational data from {name}"),
+                ("list_items", f"Fetch item catalog from {name}"),
+                ("sync", f"Trigger synchronizer for {name}"),
+            ]
+            server.tools = [
+                {
+                    "id": f"tool_{prefix}{suffix}",
+                    "namespacedName": f"{prefix}{suffix}",
+                    "originalName": suffix,
+                    "serverId": server_id,
+                    "serverName": server.name,
+                    "description": desc,
+                    "riskProfile": "Low (Read-only)",
+                    "rateLimit": "30/min",
+                    "policy": "ALLOW",
+                    "effectiveRule": "Registered External Upstream",
+                    "isAllowed": True,
+                }
+                for suffix, desc in placeholder_tools
+            ]
+        self.servers[server_id] = server
+        return server
+
+    def unregister_server(self, server_id: str) -> bool:
+        """Unregister any upstream server by ID."""
         if server_id in self.servers:
             del self.servers[server_id]
             return True

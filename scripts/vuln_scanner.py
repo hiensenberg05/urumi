@@ -170,7 +170,7 @@ print(f"{'ID':<12} {'SEVERITY':<10} {'CATEGORY':<20} {'STATUS':<20} {'TITLE'}")
 print("=" * 80)
 vuln_count = 0
 for f in findings:
-    icon = "✅" if "PASS" in f["status"] else "🚨"
+    icon = "[OK]" if "PASS" in f["status"] else "[!!]"
     if "FAIL" in f["status"]:
         vuln_count += 1
     print(f"{f['id']:<12} {f['severity']:<10} {f['category']:<20} {icon + ' ' + f['status']:<20} {f['title'][:60]}")
