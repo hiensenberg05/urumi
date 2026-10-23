@@ -4,6 +4,7 @@ Leverages the shared Redis cluster to provide sub-millisecond multi-turn memory
 across all Gateway replicas, eliminating wire payload redundancy and preserving context.
 """
 
+import hashlib
 import json
 import time
 from typing import List, Dict, Any, Tuple, Optional
@@ -16,6 +17,41 @@ class ChatMemoryManager:
 
     def _get_key(self, session_id: str) -> str:
         return f"chat:session:{session_id}:history"
+
+    @staticmethod
+    def _normalize_query_key(role: str, query: str) -> str:
+        clean = " ".join(query.strip().lower().split())
+        h = hashlib.sha256(clean.encode("utf-8")).hexdigest()[:16]
+        return f"cache:query:{role}:{h}"
+
+    @staticmethod
+    def is_mutating_query(query: str) -> bool:
+        q = query.lower()
+        return any(k in q for k in ["adjust", "update", "create", "delete", "post", "set ", "add ", "change", "order #", "purchase"])
+
+    async def get_cached_query_response(self, role: str, query: str) -> Optional[Dict[str, Any]]:
+        """Fetch pre-computed assistant response from Redis for fast answers."""
+        if self.is_mutating_query(query):
+            return None
+        try:
+            key = self._normalize_query_key(role, query)
+            raw = await redis_client.get(key)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        return None
+
+    async def cache_query_response(self, role: str, query: str, data: Dict[str, Any], ttl: int = 90) -> bool:
+        """Store assistant response in Redis cache with 90s TTL."""
+        if self.is_mutating_query(query):
+            return False
+        try:
+            key = self._normalize_query_key(role, query)
+            payload = json.dumps(data, ensure_ascii=False)
+            return await redis_client.set(key, payload, ex=ttl)
+        except Exception:
+            return False
 
     async def get_history(self, session_id: str, limit: int = 10) -> Tuple[List[Dict[str, str]], float]:
         """

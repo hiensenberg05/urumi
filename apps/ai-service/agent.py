@@ -401,27 +401,27 @@ class AgentRunner:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
     ):
-        """Invoke Groq LLM with exponential backoff on 429 rate limits and model fallback."""
-        models = [self.model, self.fallback_model]
+        """Invoke Groq LLM with instantaneous model failover on 429 rate limits."""
+        # Fast failover across distinct model families with separate rate limit quotas
+        models = [self.model, "qwen/qwen3.8-27b", "openai/gpt-oss-20b"]
         last_error = None
         for m in models:
-            for attempt in range(3):
-                try:
-                    return await self.client.chat.completions.create(
-                        model=m,
-                        messages=messages,
-                        tools=tools if tools else None,
-                        temperature=settings.temperature,
-                    )
-                except Exception as e:
-                    last_error = e
-                    err_str = str(e).lower()
-                    if "429" in err_str or "rate limit" in err_str:
-                        await asyncio.sleep(2.5 * (attempt + 1))
-                        continue
-                    else:
-                        break
-        raise last_error or RuntimeError("LLM invocation failed across all attempts and fallbacks.")
+            try:
+                return await self.client.chat.completions.create(
+                    model=m,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    temperature=settings.temperature,
+                )
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
+                if "429" in err_str or "rate limit" in err_str:
+                    # Instantly failover to the next model family with distinct TPM quota
+                    continue
+                else:
+                    break
+        raise last_error or RuntimeError("LLM invocation failed across all model failovers.")
 
     async def run(
         self,
@@ -487,8 +487,10 @@ class AgentRunner:
                     tool_map[name] = t
 
         selected_tools = list(tool_map.values())
-        selected_tool_names = [t["namespacedName"] for t in selected_tools]
+        selected_tool_names = sorted([t["namespacedName"] for t in selected_tools])
         groq_tools = self._convert_to_groq_tools(selected_tools)
+        # Sort tools deterministically for Groq LPU prefix prompt caching
+        groq_tools.sort(key=lambda t: t["function"]["name"])
 
         # Audit transparency: report token reduction metrics in guardrail execution trace
         guardrail_reports.append(GuardrailResult(

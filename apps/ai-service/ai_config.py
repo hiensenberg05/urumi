@@ -7,7 +7,7 @@ class AISettings(BaseSettings):
 
     groq_api_key: str = os.environ.get("GROQ_API_KEY", "")
     llm_model: str = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
-    fallback_model: str = os.environ.get("FALLBACK_MODEL", "openai/gpt-oss-20b")
+    fallback_model: str = os.environ.get("FALLBACK_MODEL", "qwen/qwen3.8-27b")
     
     # Gateway Endpoint for Tool Calling & Discovery
     gateway_url: str = os.environ.get(

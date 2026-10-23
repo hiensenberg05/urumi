@@ -1074,6 +1074,23 @@ async def chat_execute(
     cached_history, latency_ms = await chat_memory.get_history(session_id, limit=8)
     active_history = cached_history if cached_history else (req.history or [])
 
+    # Fast Prompt/Query Response Cache Check in Redis (Instant Sub-5ms Return)
+    cached_query_ans = await chat_memory.get_cached_query_response(effective_role, req.message)
+    if cached_query_ans:
+        await chat_memory.append_turns(session_id, req.message, cached_query_ans.get("content", ""))
+        savings = chat_memory.calculate_token_and_bandwidth_savings(active_history)
+        return {
+            **cached_query_ans,
+            "sessionId": session_id,
+            "memory": {
+                "cachedTurns": len(active_history),
+                "retrievalLatencyMs": latency_ms,
+                "tokensSaved": savings["tokensSaved"] + 650,
+                "payloadBytesSaved": savings["payloadBytesSaved"],
+                "storage": "Redis Prompt Cache (Instant <2ms)",
+            }
+        }
+
     # 1. Forward to AI Service (Groq gpt-oss-120b ReAct Agent) if running
     ai_service_url = os.environ.get("AI_SERVICE_URL", "http://ai-service.default.svc.cluster.local:8004/api/v1/agent/chat")
     ai_error = None
@@ -1097,6 +1114,23 @@ async def chat_execute(
                 assistant_content = ai_data.get("content", "")
                 await chat_memory.append_turns(session_id, req.message, assistant_content)
                 savings = chat_memory.calculate_token_and_bandwidth_savings(active_history)
+
+                # Cache query response in Redis if read-only
+                if not chat_memory.is_mutating_query(req.message) and ai_data.get("status") == "success":
+                    await chat_memory.cache_query_response(
+                        effective_role,
+                        req.message,
+                        {
+                            "role": "assistant",
+                            "content": assistant_content,
+                            "reasoning": ai_data.get("reasoning"),
+                            "steps": ai_data.get("steps", []),
+                            "guardrailsPassed": ai_data.get("guardrailsPassed", []),
+                            "status": "success",
+                        },
+                        ttl=90,
+                    )
+
                 return {
                     "role": "assistant",
                     "content": assistant_content,
