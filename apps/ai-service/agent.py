@@ -86,6 +86,7 @@ TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
     },
     "woocommerce__list_products": {
         "type": "object",
+        "description": "List products from the store catalog to inspect product names, prices, current stock levels, and SKUs.",
         "properties": {
             "page": {
                 "type": "integer",
@@ -94,8 +95,8 @@ TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             },
             "per_page": {
                 "type": "integer",
-                "description": "Number of products per page (default 10)",
-                "default": 10,
+                "description": "Number of products per page (default 25)",
+                "default": 25,
             },
         },
     },
@@ -195,14 +196,41 @@ TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
     },
     "analytics__get_daily_sales": {
         "type": "object",
-        "properties": {},
+        "description": "Retrieve gross sales, order volume, and unit metrics for a specific date or date range.",
+        "properties": {
+            "date": {
+                "type": "string",
+                "description": "Specific date in YYYY-MM-DD format (default: today)",
+            },
+            "start_date": {
+                "type": "string",
+                "description": "Start date for range query in YYYY-MM-DD format",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "End date for range query in YYYY-MM-DD format",
+            },
+        },
     },
     "analytics__get_revenue_summary": {
         "type": "object",
-        "properties": {},
+        "description": "Calculate aggregated store revenue, average order value, or grouped product revenue.",
+        "properties": {
+            "period": {
+                "type": "string",
+                "description": "Reporting period window, e.g. '7d', '30d', 'all' (default: '30d')",
+                "default": "30d",
+            },
+            "group_by": {
+                "type": "string",
+                "description": "Grouping dimension. Set to 'product' to get revenue, units sold, and order counts broken down by product.",
+                "enum": ["product"],
+            },
+        },
     },
     "analytics__get_top_selling_products": {
         "type": "object",
+        "description": "Identify top performing products ranked by total volume sold and generated revenue.",
         "properties": {
             "limit": {
                 "type": "integer",
@@ -210,6 +238,44 @@ TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "default": 5,
             }
         },
+    },
+    "hosted_currency__convert_price": {
+        "type": "object",
+        "description": "Convert pricing amount between currencies (USD, EUR, GBP, INR, JPY)",
+        "properties": {
+            "amount": {"type": "number", "description": "Amount to convert"},
+            "from_currency": {"type": "string", "description": "Source currency code, default USD", "default": "USD"},
+            "to_currency": {"type": "string", "description": "Target currency code (e.g. EUR, GBP, INR, JPY)"},
+        },
+        "required": ["amount", "to_currency"],
+    },
+    "hosted_currency__format_international_pricing": {
+        "type": "object",
+        "description": "Format USD price across major international retail markets with local currency symbols",
+        "properties": {
+            "amount_usd": {"type": "number", "description": "USD price amount (e.g. 129.99)"},
+            "amount": {"type": "number", "description": "Alternative parameter name for USD price amount"},
+        },
+    },
+    "hosted_notify__send_slack_alert": {
+        "type": "object",
+        "description": "Send urgent or informational alert to a team Slack channel",
+        "properties": {
+            "channel": {"type": "string", "description": "Slack channel name, e.g. #operations, #alerts"},
+            "message": {"type": "string", "description": "Alert message text"},
+            "severity": {"type": "string", "description": "Severity level: info, warning, critical", "default": "info"},
+        },
+        "required": ["message"],
+    },
+    "hosted_notify__send_email_dispatch": {
+        "type": "object",
+        "description": "Dispatch notification email to staff or customer",
+        "properties": {
+            "recipient": {"type": "string", "description": "Recipient email address"},
+            "subject": {"type": "string", "description": "Email subject line"},
+            "body": {"type": "string", "description": "Email body content"},
+        },
+        "required": ["recipient", "subject", "body"],
     },
 }
 
@@ -330,6 +396,33 @@ class AgentRunner:
             duration_ms = round((time.monotonic() - start) * 1000, 1)
             return {"error": str(e)}, duration_ms, "Error", target_server
 
+    async def _call_llm_with_retry(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ):
+        """Invoke Groq LLM with exponential backoff on 429 rate limits and model fallback."""
+        models = [self.model, self.fallback_model]
+        last_error = None
+        for m in models:
+            for attempt in range(3):
+                try:
+                    return await self.client.chat.completions.create(
+                        model=m,
+                        messages=messages,
+                        tools=tools if tools else None,
+                        temperature=settings.temperature,
+                    )
+                except Exception as e:
+                    last_error = e
+                    err_str = str(e).lower()
+                    if "429" in err_str or "rate limit" in err_str:
+                        await asyncio.sleep(2.5 * (attempt + 1))
+                        continue
+                    else:
+                        break
+        raise last_error or RuntimeError("LLM invocation failed across all attempts and fallbacks.")
+
     async def run(
         self,
         user_message: str,
@@ -357,11 +450,11 @@ class AgentRunner:
         allowed_tools = [t for t in raw_tools if t.get("isAllowed", True)]
 
         # 2b. Dual-Track BM25 Tool Retrieval (Guarantees Current Intent + Conversational Context)
-        # Track 1: Retrieve tools directly matching the current user message (top_k=8)
+        # Track 1: Retrieve tools directly matching the current user message (top_k=10)
         direct_tools, metrics_direct = self.tool_retriever.retrieve(
             query=user_message,
             tools=allowed_tools,
-            top_k=8,
+            top_k=10,
         )
 
         # Track 2: If multi-turn history exists, retrieve tools matching recent conversational context (top_k=4)
@@ -431,28 +524,14 @@ class AgentRunner:
         # 4. Multi-Turn ReAct Loop
         for loop_idx in range(settings.max_agent_loops):
             try:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=groq_tools if groq_tools else None,
-                    temperature=settings.temperature,
-                )
+                response = await self._call_llm_with_retry(messages, groq_tools)
             except Exception as e:
-                # Automatic fallback if primary 120b model hits rate limits
-                try:
-                    response = await self.client.chat.completions.create(
-                        model=self.fallback_model,
-                        messages=messages,
-                        tools=groq_tools if groq_tools else None,
-                        temperature=settings.temperature,
-                    )
-                except Exception as fallback_err:
-                    return AgentResponse(
-                        content=f"Model invocation failed: {str(e)} (Fallback: {str(fallback_err)})",
-                        steps=executed_steps,
-                        guardrailsPassed=guardrail_reports,
-                        status="error",
-                    )
+                return AgentResponse(
+                    content=f"Model invocation failed: {str(e)}",
+                    steps=executed_steps,
+                    guardrailsPassed=guardrail_reports,
+                    status="error",
+                )
 
             choice = response.choices[0]
             msg = choice.message

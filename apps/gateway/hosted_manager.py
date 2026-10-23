@@ -168,9 +168,25 @@ class HostedManager:
 
                 spec_tpl = TEMPLATES_CATALOG.get(template_name, {})
                 port = spec_tpl.get("port", 8005)
+                try:
+                    c_ports = item["spec"]["template"]["spec"]["containers"][0].get("ports", [])
+                    if c_ports and "containerPort" in c_ports[0]:
+                        port = int(c_ports[0]["containerPort"])
+                except Exception:
+                    pass
+
                 name = spec_tpl.get("name", f"Hosted MCP {h_id.capitalize()}")
-                tag = spec_tpl.get("tag", "HOSTED")
-                tools = spec_tpl.get("tools", [])
+                tag = spec_tpl.get("tag", "CUSTOM_CODE" if h_id == "customcode" else "HOSTED")
+                tools = list(spec_tpl.get("tools", []))
+                if h_id == "customcode":
+                    name = "Custom Wholesale Discount Calculator"
+                    tag = "CUSTOM_CODE"
+                    tools = [
+                        {
+                            "name": "custom__discount_calculator",
+                            "description": "Calculate tiered wholesale discount for large customer orders",
+                        }
+                    ]
 
                 rec = HostedServerRecord(
                     id=h_id,

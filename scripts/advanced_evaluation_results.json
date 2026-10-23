@@ -1,0 +1,223 @@
+[
+  {
+    "id": 1,
+    "name": "Analytics + Inventory Co-Pilot",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 4.3,
+    "tools_called": [
+      "analytics__get_top_selling_products",
+      "inventory__batch_check_stock"
+    ],
+    "response_snippet": "**Top\u2011Selling Products & Current Warehouse Stock**\n\n| Rank | Product Name | SKU | Units Sold (last period) | Current Stock | Stock Status |\n|------|--------------|-----|--------------------------|----"
+  },
+  {
+    "id": 2,
+    "name": "WooCommerce + Hosted Currency FX",
+    "role": "admin",
+    "passed": false,
+    "duration_s": 47.8,
+    "tools_called": [
+      "woocommerce__list_products",
+      "hosted_currency__convert_price",
+      "hosted_currency__convert_price"
+    ],
+    "response_snippet": "Model invocation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01jpqpt4snfrwtp8v7j58gh61s` service tier `on_demand` on tokens"
+  },
+  {
+    "id": 3,
+    "name": "Inventory + Hosted Slack Alert",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 30.0,
+    "tools_called": [
+      "inventory__list_low_stock",
+      "hosted_notify__send_slack_alert"
+    ],
+    "response_snippet": "**Out\u2011of\u2011Stock Alert Sent**\n\nThe Slack channel **#operations** has been notified with the following summary:\n\n| Product | SKU | Stock Shortage |\n|---------|-----|----------------|\n| Premium Wireless H"
+  },
+  {
+    "id": 4,
+    "name": "Order Pipeline + Product Stock Cross-Check",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 47.3,
+    "tools_called": [
+      "woocommerce__get_order",
+      "inventory__check_stock"
+    ],
+    "response_snippet": "**Order #45 \u2013 Product & Stock Status**\n\n- **Product Purchased:** *Wireless Noise\u2011Canceling Earbuds Pro*  \n  - SKU: `SKU-DEMO-1792735206`  \n  - Quantity ordered: **2**  \n  - Unit price: **$189.99**  \n "
+  },
+  {
+    "id": 5,
+    "name": "Multi-Tenant Store Catalog Comparison",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 66.5,
+    "tools_called": [
+      "woocommerce__list_products",
+      "store_tech__list_products"
+    ],
+    "response_snippet": "**USB\u2011C Multi\u2011Port Hub \u2013 Stock & Price Comparison**\n\n| Store | Price | Stock Quantity |\n|-------|-------|----------------|\n| **Default Store** | **$45.00** | **900** |\n| **Tech Store** | **$45.00** | "
+  },
+  {
+    "id": 6,
+    "name": "Tenant Store Order Pipeline",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 39.2,
+    "tools_called": [
+      "store_tech__list_orders"
+    ],
+    "response_snippet": "**Recent Orders \u2013 Tech Store (Last 10)**  \n\n| Order # | Date (UTC) | Status | Customer | Total | Items |\n|---------|------------|--------|----------|-------|-------|\n| **42** | 2026\u201110\u201121 10:45 | **pr"
+  },
+  {
+    "id": 7,
+    "name": "Unprovisioned Store Detection",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 20.8,
+    "tools_called": [],
+    "response_snippet": "I\u2019m sorry, but the **European Electronics Store** is not currently provisioned on the Urumi platform.  \nThe only stores you can query at this time are:\n\n- **Default Store** (`store.local`) \u2013 accessed "
+  },
+  {
+    "id": 8,
+    "name": "Daily Gross Sales Metrics",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 33.5,
+    "tools_called": [
+      "analytics__get_daily_sales"
+    ],
+    "response_snippet": "**Today's Gross Sales & Order Summary (2026\u201110\u201123)**  \n\n| Metric | Value |\n|--------|-------|\n| **Gross Sales** | **$759.96** |\n| **Order Count** | **2** |\n| **Items Sold** | 4 |\n| **Status Breakdown*"
+  },
+  {
+    "id": 9,
+    "name": "Product-Level Revenue Grouping",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 26.7,
+    "tools_called": [
+      "analytics__get_revenue_summary"
+    ],
+    "response_snippet": "**Revenue Summary \u2013 Last 30\u202fDays (Grouped by Product)**  \n\n| Product Name | SKU | Units Sold | Total Revenue |\n|--------------|-----|------------|---------------|\n| Premium Wireless Headphones | SKU\u20111"
+  },
+  {
+    "id": 10,
+    "name": "Inventory Custom Threshold Scan",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 34.9,
+    "tools_called": [
+      "inventory__list_low_stock"
+    ],
+    "response_snippet": "**Products with Stock Below 20 Units**\n\n| ID | Product Name | SKU | Price | Current Stock | Status | Critically Low? |\n|----|--------------|-----|-------|---------------|--------|-----------------|\n| "
+  },
+  {
+    "id": 11,
+    "name": "Inventory Audit Stock Adjustment",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 27.9,
+    "tools_called": [
+      "inventory__adjust_stock"
+    ],
+    "response_snippet": "**Stock Adjustment Completed**\n\n- **Product:** Ergonomic Mechanical Keyboard  \n- **SKU:** `SKU-1002`  \n- **Previous Quantity:** 15  \n- **Delta Applied:** +10  \n- **New Quantity:** 25  \n- **Reason:** S"
+  },
+  {
+    "id": 12,
+    "name": "Customer Order Verification",
+    "role": "support_rep",
+    "passed": true,
+    "duration_s": 26.3,
+    "tools_called": [
+      "woocommerce__get_order"
+    ],
+    "response_snippet": "**Order #45 \u2013 Status & Customer Email**\n\n- **Order Status:** \u2705 *Completed*  \n- **Customer Email:** \u2709\ufe0f `evaluator@urumi.enterprise`  \n\nLet me know if you need any further details or actions on this ord"
+  },
+  {
+    "id": 13,
+    "name": "Customer Order Status Update",
+    "role": "support_rep",
+    "passed": true,
+    "duration_s": 24.8,
+    "tools_called": [
+      "woocommerce__update_order_status"
+    ],
+    "response_snippet": "**Order Update Confirmation**\n\n- **Order ID:** 45  \n- **New Status:** **processing**  \n- **Total Amount:** $379.98  \n- **Last Updated:** 2026\u201110\u201123 06:56:53 UTC  \n\nThe order status has been successful"
+  },
+  {
+    "id": 14,
+    "name": "Forex Live Exchange Rates",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 27.4,
+    "tools_called": [
+      "hosted_currency__get_exchange_rates"
+    ],
+    "response_snippet": "**Live Exchange Rate Lookup (USD \u2192 Target Currencies)**  \n\n| Currency | Rate (USD \u2192 Currency) |\n|----------|-----------------------|\n| **EUR**  | 0.92 |\n| **GBP**  | 0.79 |\n| **JPY**  | 154.2 |\n| **IN"
+  },
+  {
+    "id": 15,
+    "name": "International Pricing Matrix",
+    "role": "admin",
+    "passed": false,
+    "duration_s": 26.0,
+    "tools_called": [
+      "hosted_currency__format_international_pricing"
+    ],
+    "response_snippet": "Model invocation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01jpqpt4snfrwtp8v7j58gh61s` service tier `on_demand` on tokens"
+  },
+  {
+    "id": 16,
+    "name": "System Banner Broadcast Alert",
+    "role": "admin",
+    "passed": false,
+    "duration_s": 31.7,
+    "tools_called": [
+      "hosted_notify__broadcast_banner"
+    ],
+    "response_snippet": "Model invocation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01jpqpt4snfrwtp8v7j58gh61s` service tier `on_demand` on tokens"
+  },
+  {
+    "id": 17,
+    "name": "Cross-Domain RBAC Inquiry",
+    "role": "support_rep",
+    "passed": true,
+    "duration_s": 14.8,
+    "tools_called": [],
+    "response_snippet": "I\u2019m sorry, but I don\u2019t have access to real\u2011time financial sales data for today.  \nI can, however, help you check current inventory levels for any SKUs you\u2019re interested in.  \n\n**What I can do right no"
+  },
+  {
+    "id": 18,
+    "name": "Support Rep Permitted Dual-Tool Flow",
+    "role": "support_rep",
+    "passed": true,
+    "duration_s": 55.0,
+    "tools_called": [
+      "woocommerce__list_orders",
+      "inventory__check_stock"
+    ],
+    "response_snippet": "**Open Orders (Processing Status)**  \n| Order ID | Customer | Total | Items | Date Created |\n|----------|----------|-------|-------|--------------|\n| 45 | Antigravity Evaluator | **$379.98** | 2 \u00d7 Wir"
+  },
+  {
+    "id": 19,
+    "name": "Live Catalog Product Addition",
+    "role": "admin",
+    "passed": true,
+    "duration_s": 33.2,
+    "tools_called": [
+      "woocommerce__create_product"
+    ],
+    "response_snippet": "**\u2705 Product Created**\n\n| Field | Value |\n|-------|-------|\n| **ID** | 49 |\n| **Name** | Smart Noise\u2011Isolating Desk Microphone |\n| **SKU** | SKU-MIC-SMART |\n| **Price** | $119.00 |\n| **Stock Quantity**"
+  },
+  {
+    "id": 20,
+    "name": "Post-Creation Verification",
+    "role": "admin",
+    "passed": false,
+    "duration_s": 14.0,
+    "tools_called": [],
+    "response_snippet": "Model invocation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01jpqpt4snfrwtp8v7j58gh61s` service tier `on_demand` on tokens"
+  }
+]

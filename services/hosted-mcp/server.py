@@ -176,20 +176,25 @@ if SERVICE_TYPE in ("currency", "all"):
 
     @mcp.tool(name="hosted_currency__format_international_pricing")
     async def format_international_pricing(
-        amount_usd: float,
+        amount_usd: Optional[float] = None,
+        amount: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Format an item's USD catalog price across major international retail markets.
         
         Args:
             amount_usd: Product price in US Dollars (e.g. 199.00)
+            amount: Alternative parameter name for Product price in US Dollars
         """
+        val = amount_usd if amount_usd is not None else amount
+        if val is None:
+            raise ValueError("Parameter 'amount_usd' or 'amount' is required.")
         return {
-            "usd": f"${amount_usd:,.2f}",
-            "eur": f"€{round(amount_usd * RATES['EUR'], 2):,.2f}",
-            "gbp": f"£{round(amount_usd * RATES['GBP'], 2):,.2f}",
-            "inr": f"₹{round(amount_usd * RATES['INR'], 2):,.2f}",
-            "jpy": f"¥{int(round(amount_usd * RATES['JPY'], 0)):,}",
-            "cad": f"CA${round(amount_usd * RATES['CAD'], 2):,.2f}",
+            "usd": f"${val:,.2f}",
+            "eur": f"€{round(val * RATES['EUR'], 2):,.2f}",
+            "gbp": f"£{round(val * RATES['GBP'], 2):,.2f}",
+            "inr": f"₹{round(val * RATES['INR'], 2):,.2f}",
+            "jpy": f"¥{int(round(val * RATES['JPY'], 0)):,}",
+            "cad": f"CA${round(val * RATES['CAD'], 2):,.2f}",
         }
 
 # -------------------------------------------------------------

@@ -63,8 +63,39 @@ class BM25ToolRetriever:
 
         # Tag core default WooCommerce tools with default/primary store keywords
         extra_tags = ""
+        if "list_products" in name:
+            extra_tags += " catalog products items search find lookup stock quantity price pricing cost skus merchandise inventory"
+        if "create_product" in name:
+            extra_tags += " add new product create item publish listing"
+        if "list_orders" in name:
+            extra_tags += " orders purchases sales transactions customer fulfillment status pending processing completed"
+        if "get_order" in name:
+            extra_tags += " order details receipt customer transaction lookup id"
+        if "create_order" in name:
+            extra_tags += " place new order purchase checkout buy customer transaction"
+        if "update_order_status" in name:
+            extra_tags += " order status mark complete refund cancel ship update fulfill"
+        if "check_stock" in name:
+            extra_tags += " warehouse inventory stock quantity level available check sku"
+        if "adjust_stock" in name:
+            extra_tags += " warehouse adjust delta modify stock supply shipment return correction add subtract"
+        if "update_stock" in name:
+            extra_tags += " warehouse set overwrite count total stock override inventory"
+        if "list_low_stock" in name:
+            extra_tags += " low stock reorder alert running out minimum threshold depleted shortage warning"
+        if "daily_sales" in name:
+            extra_tags += " daily sales revenue gross earnings today financial metrics performance orders count"
+        if "revenue_summary" in name:
+            extra_tags += " revenue total summary monthly quarterly earnings financial sales average order value aov"
+        if "top_selling" in name:
+            extra_tags += " top best selling most popular high volume products performers leaderboard ranking sales"
+        if "currency" in name:
+            extra_tags += " currency exchange convert foreign fx rate forex dollar euro yen pound inr jpy money"
+        if "notify" in name or "slack" in name:
+            extra_tags += " notification alert slack message email dispatch broadcast banner warning"
+
         if name.startswith("woocommerce__"):
-            extra_tags = "default primary core main store"
+            extra_tags += " default primary core main store"
 
         # Construct weighted document string (name is repeated for prominence)
         return f"{name} {name} {server} {desc} {param_names} {extra_tags}"
