@@ -259,9 +259,14 @@ To demonstrate dynamic extensibility without code modifications to the core plat
 \end{enumerate}
 
 \subsection{Autonomous Multi-Store Tenant Factory}
-The platform incorporates an autonomous multi-store provisioning engine. Administrators can provision an entirely new tenant store (e.g., \texttt{tech.store.local}) directly through the management console or via AI agent instructions. 
+The platform incorporates an autonomous multi-store provisioning engine designed for multi-brand or multi-region e-commerce enterprises. Administrators can provision an entirely new tenant store (e.g., \texttt{tech.store.local}) directly through the management console or via programmatic API calls (\texttt{POST /api/v1/stores/provision}):
 
-The provisioning engine automatically creates an isolated Kubernetes namespace (\texttt{store-<slug>}), deploys dedicated MariaDB and WordPress pods, provisions an isolated Ingress route, and mounts a tenant-scoped MCP server. Once healthy, the Gateway dynamically discovers the tenant and prefixes its tools (e.g., \texttt{store\_tech\_\_list\_products}), enforcing strict namespace data isolation.
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Namespace-Level Tenant Isolation}: The provisioning factory automatically creates an isolated Kubernetes namespace (\texttt{store-<slug>}) containing dedicated MariaDB relational storage, an independent WordPress/WooCommerce instance, and a tenant-scoped MCP server pod.
+    \item \textbf{Dynamic Route \& Ingress Creation}: Dedicated ingress rules route tenant traffic (e.g., \texttt{http://<slug>.store.local}) directly to the tenant's isolated storefront container without altering primary store traffic.
+    \item \textbf{Automated Tool Namespacing}: Once readiness probes succeed, the Gateway dynamically mounts the new upstream server under a tenant prefix (e.g., \texttt{store\_tech\_\_list\_products}, \texttt{store\_tech\_\_list\_orders}), updating internal routing tables across all Gateway replicas without pod restarts.
+    \item \textbf{Clean Cascade Teardown}: Deleting a tenant store (\texttt{DELETE /api/v1/stores/\{slug\}}) automatically terminates the tenant namespace, purges persistent volume claims, and revokes the associated MCP tools from the central catalog, verified end-to-end via \texttt{scripts/test\_multi\_store.py}.
+\end{enumerate}
 
 % ---------------------------------------------------------
 % SECTION 4: GATEWAY INTERNAL ENGINEERING
@@ -340,6 +345,18 @@ A major challenge in production agent deployments is the latency overhead of LLM
 To address this, the Gateway implements an idempotent \textbf{Redis Prompt Query Cache} with a 90-second TTL. Queries that request read-only catalog or stock information are hashed (using SHA-256 over normalized user text and caller role). If a matching query is received within 90 seconds, the Gateway bypasses the LLM and tool invocation entirely, returning the validated cached synthesis. 
 
 As empirically benchmarked in Section~\ref{sec:benchmarks}, this reduces response latency from \textbf{31,344 ms down to 14.6 ms}---a \textbf{2,146x speedup}.
+
+\subsection{Enterprise Observability and Prometheus OpenMetrics Engine}
+The platform incorporates a native, production-grade telemetry engine implemented in \texttt{apps/gateway/metrics.py}. Rather than relying on external sidecars or black-box agents, the Gateway acts as an in-memory telemetry collector and OpenMetrics exporter exposing standard Prometheus metrics on \texttt{GET /metrics}:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Uptime \& Throughput Gauges}: Tracks continuous uptime (\texttt{mcp\_gateway\_uptime\_seconds}) and cumulative tool invocation attempts partitioned by outcome (\texttt{mcp\_tool\_calls\_total\{status="success|error"\}}).
+    \item \textbf{Perimeter Security Metrics}: Quantifies unauthorized access attempts intercepted by the zero-trust authorization engine (\texttt{mcp\_rbac\_violations\_total}) and client rate-limit throttles (\texttt{mcp\_rate\_limit\_blocks\_total}).
+    \item \textbf{Microservice Health \& Circuit Breakers}: Live gauges report connectivity status (\texttt{mcp\_upstream\_server\_status}) and current circuit breaker states (\texttt{mcp\_circuit\_breaker\_state}, where $0=\text{CLOSED}$, $1=\text{OPEN}$, $2=\text{HALF\_OPEN}$).
+    \item \textbf{Latency Distributions \& Tool Frequency}: Records rolling 150-sample latency percentiles per upstream microservice (\texttt{mcp\_server\_latency\_seconds\_p95}) and tracks invocation counts per tool (\texttt{mcp\_tool\_execution\_count\{tool="..."\}}).
+    \item \textbf{Zero-Configuration Kubernetes Scraping}: The Helm deployment and service templates embed standard Prometheus annotations (\texttt{prometheus.io/scrape: "true"}, \texttt{prometheus.io/port: "8000"}, \texttt{prometheus.io/path: "/metrics"}), enabling automated scraping by Prometheus and pre-built Grafana dashboards.
+\end{itemize}
+High-resolution operational diagnostics and percentiles are simultaneously exposed via \texttt{GET /api/v1/telemetry} to drive real-time visualization in the React 19 Management Console.
 
 % ---------------------------------------------------------
 % SECTION 5: AI AGENT ENGINE & REACT LOOP

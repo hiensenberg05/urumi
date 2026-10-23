@@ -22,6 +22,8 @@ An enterprise-grade, multi-tenant **Model Context Protocol (MCP) Gateway** deplo
    - [Placing an Order via Storefront & REST](#1-how-to-place-an-order)
    - [Connecting an External MCP Client (Cursor, Claude Desktop)](#2-connecting-an-external-mcp-client)
    - [Using the Chat Agent](#3-using-the-chat-agent)
+   - [Provisioning Multi-Store Tenants](#4-provisioning-multi-store-tenants)
+   - [Prometheus Monitoring & Observability](#5-prometheus-monitoring--observability)
 7. [Source Code Components](#-source-code-components)
 8. [Helm Charts & Values Files](#-helm-charts--values-files)
 9. [System Design and Tradeoffs Summary](#-system-design-and-tradeoffs-summary)
@@ -321,6 +323,69 @@ async with Client(url="http://localhost:8000/mcp", headers={"X-API-Key": "admin-
    - *"Find order #101 and update its status to completed."*
 4. **Session Persistence**: Refresh your browser (`F5`); your dialogue history is instantly restored from Redis.
 5. **Resetting Session**: Click the **Reset** button or call `DELETE /api/v1/chat/history` to wipe conversation memory.
+
+---
+
+### 4. Provisioning Multi-Store Tenants
+
+The platform includes an autonomous tenant factory allowing instant deployment of isolated e-commerce stores:
+
+#### A. Provision a Store via UI Console
+1. Navigate to **[http://localhost:3000](http://localhost:3000)** and select the **"Stores"** tab.
+2. Click **Create New Store**, enter store name and slug (e.g. `tech-store`), and click **Provision**.
+3. The platform deploys a dedicated Kubernetes namespace (`store-tech`), boots isolated MariaDB and WordPress pods, and auto-registers tenant-scoped tools (`store_tech__*`).
+
+#### B. Provision via Gateway REST API
+```bash
+curl -X POST http://gateway.local/api/v1/stores/provision \
+  -H "X-API-Key: admin-key-urumi-2026" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Electronics Store",
+    "slug": "electronics",
+    "admin_email": "admin@electronics.local"
+  }'
+```
+
+#### C. Lifecycle Verification & Automated Tests
+Verify tenant creation, dynamic prefix routing, and cascade teardown:
+```bash
+python scripts/test_multi_store.py
+```
+
+---
+
+### 5. Prometheus Monitoring & Observability
+
+The Gateway implements an in-memory telemetry collector and exposes standard OpenMetrics on `/metrics` for Prometheus and Grafana scrapers.
+
+#### A. Querying Metrics Endpoint
+```bash
+curl -s http://gateway.local/metrics
+# or inside Kubernetes cluster:
+# curl -s http://gateway.default.svc.cluster.local:8000/metrics
+```
+
+#### B. Exposed Metric Dimensions
+- `mcp_gateway_uptime_seconds`: Total runtime of the Gateway.
+- `mcp_tool_calls_total{status="success|error"}`: Cumulative tool execution attempts.
+- `mcp_rbac_violations_total`: Unauthorized tool invocation attempts blocked by RBAC.
+- `mcp_rate_limit_blocks_total`: HTTP 429 requests throttled by sliding-window rate limiters.
+- `mcp_upstream_server_status{server_id="..."}`: Health state (1=Connected, 0=Down).
+- `mcp_circuit_breaker_state{server_id="..."}`: Circuit breaker state (0=CLOSED, 1=OPEN, 2=HALF_OPEN).
+- `mcp_server_requests_total{server_id="...",status="..."}`: Volume grouped by upstream microservice.
+- `mcp_server_latency_seconds_p95{server_id="..."}`: 95th percentile latency distribution per upstream.
+- `mcp_tool_execution_count{tool="..."}`: Granular execution frequency counter per tool.
+
+#### C. Prometheus Scrape Configuration (Helm)
+The Gateway Deployment and Service templates include native Prometheus scrape annotations:
+```yaml
+annotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+```
+Prometheus server automatically discovers all Gateway replicas and scrapes metrics every 15 seconds. High-resolution telemetry JSON is also accessible in real time via `GET /api/v1/telemetry` for the React dashboard.
 
 ---
 

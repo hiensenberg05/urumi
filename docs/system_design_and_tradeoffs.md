@@ -120,6 +120,25 @@ sequenceDiagram
 | **Network Partition / Pod Eviction** | **Multi-Replica Ingress Load Balancing**: Gateway Deployment runs 3 replicas with readiness and liveness probes. Kubernetes automatically evicts failing pods and routes traffic only to healthy instances. |
 | **Invalid Tool Input / Hallucination** | **Schema Guardrails**: The Gateway catches Pydantic validation errors and passes descriptive feedback back into the ReAct loop so the LLM can self-correct parameter types or missing fields in the next turn. |
 
+### 2.4 Autonomous Multi-Store Provisioning & Tenant Isolation
+To support multi-merchant enterprise operations, the Gateway incorporates an autonomous store factory:
+- **Namespace-Level Isolation**: Each provisioned tenant store receives a dedicated Kubernetes namespace (`store-<slug>`). MariaDB databases, WordPress instances, and tenant MCP pods run in complete isolation from the primary catalog.
+- **Dynamic Tool Auto-Discovery & Prefixing**: When a tenant is provisioned via `POST /api/v1/stores/provision`, the Gateway polls readiness probes until the pod is healthy, dynamically registers the tenant under the prefix `store_<slug>__*` (e.g. `store_tech__list_products`), and updates routing tables on all Gateway replicas without pod restarts.
+- **Cascade Deletion**: When a store is decommissioned (`DELETE /api/v1/stores/{slug}`), the Gateway cascades resource teardown across the tenant namespace and automatically unregisters its tools from the catalog.
+
+### 2.5 Prometheus & OpenMetrics Telemetry Architecture
+The Gateway includes a high-resolution in-memory telemetry engine (`apps/gateway/metrics.py`) exposing the standard OpenMetrics exposition format on `/metrics`:
+- **Scrape Automation**: Deployment and Service manifests contain `prometheus.io/scrape: "true"`, `prometheus.io/port: "8000"`, and `prometheus.io/path: "/metrics"` annotations for zero-config Prometheus scraping.
+- **Exposed Dimensions**:
+  * Request throughput counters: `mcp_tool_calls_total{status="success|error"}`.
+  * Security policy blocks: `mcp_rbac_violations_total`.
+  * Rate limit throttles: `mcp_rate_limit_blocks_total`.
+  * Upstream service connectivity gauges: `mcp_upstream_server_status{server_id="..."}`.
+  * Circuit breaker states: `mcp_circuit_breaker_state{server_id="..."}` (0=CLOSED, 1=OPEN, 2=HALF_OPEN).
+  * Latency percentiles: `mcp_server_latency_seconds_p95{server_id="..."}`.
+  * Granular per-tool counters: `mcp_tool_execution_count{tool="..."}`.
+- **Dual Telemetry Consumer**: Metrics are consumable both by external Prometheus/Grafana infrastructure and by the React Management Console via `GET /api/v1/telemetry`.
+
 ---
 
 ## 3. What Changes for Production: Local vs. VPS/Cloud

@@ -16,6 +16,10 @@ spec:
       labels:
         app.kubernetes.io/name: gateway
         app.kubernetes.io/component: mcp-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.gateway.port }}"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: gateway
@@ -63,6 +67,10 @@ metadata:
   labels:
     app.kubernetes.io/name: gateway
     app.kubernetes.io/component: mcp-gateway
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.gateway.port }}"
+    prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
   ports:
