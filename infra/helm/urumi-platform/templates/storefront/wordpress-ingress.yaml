@@ -12,6 +12,12 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
 spec:
   ingressClassName: {{ .Values.storefront.ingress.className }}
+  {{- if and .Values.storefront.ingress.tls .Values.storefront.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.storefront.ingress.host }}
+      secretName: {{ .Values.storefront.ingress.tls.secretName | default "wordpress-tls-cert" }}
+  {{- end }}
   rules:
     - host: {{ .Values.storefront.ingress.host }}
       http:

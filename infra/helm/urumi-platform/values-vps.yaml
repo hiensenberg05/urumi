@@ -1,8 +1,88 @@
-# Production/VPS overrides for urumi-platform (k3s)
+# =================================================================
+# URUMI ENTERPRISE PLATFORM - PRODUCTION VPS OVERRIDES (k3s / Cloud K8s)
+# Usage: helm upgrade --install storefront infra/helm/urumi-platform -f infra/helm/urumi-platform/values-vps.yaml
+# =================================================================
+
 global:
   environment: vps
+  # k3s uses local-path storage provisioner by default; Cloud providers use gp3 / do-block-storage
   storageClass: "local-path"
 
 storefront:
+  enabled: true
+  wordpress:
+    siteUrl: "https://store.urumi.example.com"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1536Mi
   ingress:
+    enabled: true
+    className: nginx
     host: store.urumi.example.com
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      kubernetes.io/tls-acme: "true"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    tls:
+      enabled: true
+      secretName: store-tls-cert
+
+gateway:
+  enabled: true
+  replicas: 3
+  image:
+    repository: hiensenbergg/mcp-gateway
+    tag: "v1.6.7"
+    pullPolicy: Always
+  ingress:
+    enabled: true
+    className: nginx
+    host: gateway.urumi.example.com
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      kubernetes.io/tls-acme: "true"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/enable-cors: "true"
+      nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+      nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    tls:
+      enabled: true
+      secretName: gateway-tls-cert
+
+aiService:
+  enabled: true
+  image:
+    repository: hiensenbergg/ai-service
+    tag: "v1.3.6"
+    pullPolicy: Always
+  replicas: 1
+
+mcpServers:
+  woocommerce:
+    image:
+      repository: hiensenbergg/woocommerce-mcp
+      tag: "v1.1.0"
+      pullPolicy: Always
+  inventory:
+    image:
+      repository: hiensenbergg/inventory-mcp
+      tag: "v1.1.1"
+      pullPolicy: Always
+  analytics:
+    image:
+      repository: hiensenbergg/analytics-mcp
+      tag: "v1.1.0"
+      pullPolicy: Always
+
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7.2-alpine"

@@ -89,6 +89,13 @@ metadata:
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key"
 spec:
   ingressClassName: {{ .Values.gateway.ingress.className }}
+  {{- if and .Values.gateway.ingress.tls .Values.gateway.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.gateway.ingress.host }}
+        - {{ .Values.storefront.ingress.host }}
+      secretName: {{ .Values.gateway.ingress.tls.secretName | default "gateway-tls-cert" }}
+  {{- end }}
   rules:
     - host: {{ .Values.gateway.ingress.host }}
       http:
