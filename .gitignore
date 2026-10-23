@@ -49,6 +49,15 @@ Thumbs.db
 .kind/
 kubectl
 
+# LaTeX build artifacts
+*.aux
+*.toc
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+
 # Credentials, Keys & Secrets
 *.env*
 !*.env.example
@@ -67,5 +76,6 @@ claude_desktop_config.json
 ~$*
 *.docx
 *.pdf
+!report/report.pdf
 *.tmp
 

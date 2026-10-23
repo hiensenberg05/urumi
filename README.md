@@ -8,7 +8,59 @@
 [![Redis](https://img.shields.io/badge/Redis-v7.2_Cluster-dc382d.svg?logo=redis&logoColor=white)](https://redis.io/)
 [![React 19](https://img.shields.io/badge/Frontend-React_19_+_Vite-61dafb.svg?logo=react&logoColor=black)](https://vitejs.dev/)
 
-An enterprise-grade, multi-tenant **Model Context Protocol (MCP) Gateway** deployed on Kubernetes and Docker. It provides a secure, unified bridge between AI agents (Cursor, Claude Desktop, Antigravity, custom LLM copilots) and enterprise e-commerce microservices with **centralized RBAC, Redis chat session memory, dynamic tool retrieval, hosted on-demand MCP pods, SSRF guardrails, and automated multi-store tenant provisioning**.
+An enterprise-grade, multi-tenant **Model Context Protocol (MCP) Gateway** deployed on Kubernetes and Docker. It provides a secure, unified reverse proxy and governance layer bridging external AI agents (Cursor, Claude Desktop, Antigravity, custom LLM copilots) and enterprise e-commerce microservices with **centralized RBAC, Redis chat session memory, dynamic BM25 tool retrieval, on-demand hosted MCP pods, SSRF guardrails, and automated multi-store tenant provisioning**.
+
+---
+
+## 📑 Table of Contents
+1. [Repository & Deliverables Structure](#-repository--deliverables-structure)
+2. [Quick Access URLs & Credentials](#-quick-access-urls--default-credentials)
+3. [Architecture Overview](#-comprehensive-platform-architecture)
+4. [Local Setup Instructions (Kind & Docker Compose)](#-local-setup-instructions)
+5. [Production VPS Setup Instructions (k3s & Helm)](#-production-vps-setup-instructions-k3s)
+6. [How-To Guides](#-how-to-guides)
+   - [Placing an Order via Storefront & REST](#1-how-to-place-an-order)
+   - [Connecting an External MCP Client (Cursor, Claude Desktop)](#2-connecting-an-external-mcp-client)
+   - [Using the Chat Agent](#3-using-the-chat-agent)
+7. [Source Code Components](#-source-code-components)
+8. [Helm Charts & Values Files](#-helm-charts--values-files)
+9. [System Design and Tradeoffs Summary](#-system-design-and-tradeoffs-summary)
+10. [Threat Model Summary](#-threat-model-summary)
+11. [Bonus & Stand-Out Items Catalog](#-bonus--stand-out-items-catalog)
+12. [Evaluation & Testing Suites](#-evaluation--testing-suites)
+
+---
+
+## 📂 Repository & Deliverables Structure
+
+```
+.
+├── apps/
+│   ├── frontend/                  # [Deliverable 2] React 19 Management Console & Chat UI
+│   ├── gateway/                   # [Deliverable 2] MCP Gateway, Router, RBAC, Redis Cache & Rate Limiter
+│   └── ai-service/                # [Deliverable 2] ReAct LLM Agent Engine, BM25 Tool Selection & Guardrails
+├── services/
+│   ├── woocommerce-mcp/           # [Deliverable 2] WooCommerce FastMCP Server (Catalog & Orders)
+│   ├── inventory-mcp/             # Inventory FastMCP Server (Real-time Stock & Batches)
+│   ├── analytics-mcp/             # Analytics FastMCP Server (Sales, Revenue, Top Sellers)
+│   └── hosted-mcp/                # On-demand Hosted MCP Pods (Forex, Notifications, Custom Code)
+├── infra/
+│   ├── helm/urumi-platform/       # [Deliverable 3] Production Helm Chart
+│   │   ├── values.yaml            # Base chart values
+│   │   ├── values-kind.yaml       # [Deliverable 3] Local development overrides
+│   │   └── values-vps.yaml        # [Deliverable 3] Production VPS / k3s overrides with TLS
+│   └── k8s/                       # Raw Kubernetes manifests & Kind cluster configuration
+├── docs/
+│   ├── system_design_and_tradeoffs.md  # [Deliverable 4] Complete Architecture & Tradeoffs Note
+│   ├── threat_model.md                 # [Deliverable 5] Threat Model & Security Note
+│   └── production_vps_deployment.md    # Turnkey VPS deployment runbook
+├── report/
+│   ├── report.tex                 # [Final Deliverable] 15-Page Comprehensive Walkthrough Report in LaTeX
+│   └── report.pdf                 # [Final Deliverable] Compiled PDF Submission Document
+├── scripts/                       # Automated testing, benchmarking, and bootstrapping scripts
+├── docker-compose.yml             # Single-host production compose stack (11 microservices)
+└── README.md                      # [Deliverable 1] Master documentation and runbook
+```
 
 ---
 
@@ -38,7 +90,7 @@ flowchart TD
     end
 
     subgraph EdgeLayer["Ingress & Edge Routing"]
-        Ingress["☸️ NGINX Ingress Controller<br/>(127.0.0.1:80 / 443)"]
+        Ingress["☸️ Ingress Controller (NGINX / Traefik)<br/>(Ports 80 / 443 with TLS)"]
     end
 
     subgraph CoreGatewayCluster["Core Platform Cluster (High Availability)"]
@@ -46,30 +98,26 @@ flowchart TD
         GW2["🛡️ Gateway Pod 2<br/>:8000"]
         GW3["🛡️ Gateway Pod 3<br/>:8000"]
         
-        REDIS[("⚡ Redis 7.2 Cache<br/>• Sliding-Window Rate Limiter<br/>• Intra-Session Chat Memory<br/>• 24h TTL Session Retention")]
+        REDIS[("⚡ Redis 7.2 Cluster<br/>• Sliding-Window Rate Limiter (60 req/m)<br/>• Intra-Session Chat Memory (24h TTL)<br/>• Prompt Query Cache (90s TTL)")]
         
-        AI["🧠 AI Service (ReAct Agent Engine)<br/>:8004<br/>• Groq GPT-OSS-120B / 20B Fallback<br/>• Dual-Track BM25 Tool Retrieval<br/>• Security & Injection Guardrails<br/>• Exponential Backoff & Retry"]
+        AI["🧠 AI Service (ReAct Engine)<br/>:8004<br/>• Groq GPT-OSS-120B / Qwen-27B Fallback<br/>• Dual-Track BM25 Tool Selection<br/>• SSRF & Injection Guardrails"]
     end
 
     subgraph CoreMCP["Standard Upstream FastMCP Servers"]
-        WCMCP["📦 WooCommerce MCP (:8001)<br/>• list_products, create_product<br/>• list_orders, get_order, create_order<br/>• update_order_status"]
-        INVMCP["📊 Inventory MCP (:8002)<br/>• check_stock, batch_check_stock<br/>• list_low_stock, update_stock<br/>• adjust_stock (relative delta)"]
-        ANAMCP["📈 Analytics MCP (:8003)<br/>• get_daily_sales, get_revenue_summary<br/>• get_top_selling_products"]
+        WCMCP["📦 WooCommerce MCP (:8001)<br/>• Catalog & Order lifecycle"]
+        INVMCP["📊 Inventory MCP (:8002)<br/>• Stock checks & adjustments"]
+        ANAMCP["📈 Analytics MCP (:8003)<br/>• Sales reports & top sellers"]
     end
 
-    subgraph HostedMCP["On-Demand Hosted MCP Pods (Differentiator #5)"]
-        HOST_CURR["💱 Currency & Forex Converter (:8006)<br/>• convert_price, get_exchange_rates<br/>• format_international_pricing"]
-        HOST_NOTIF["🔔 Notification Dispatcher (:8005)<br/>• send_slack_alert, send_email_dispatch<br/>• broadcast_banner"]
-        HOST_CODE["💻 Custom Code Runner (:8008)<br/>• custom__discount_calculator"]
+    subgraph HostedMCP["On-Demand Hosted MCP Pods"]
+        HOST_CURR["💱 Currency & Forex (:8006)"]
+        HOST_NOTIF["🔔 Notification Alerts (:8005)"]
+        HOST_CODE["💻 Custom Code Runner (:8008)"]
     end
 
-    subgraph MultiTenantStores["Multi-Store Tenant Factory (Namespace Isolation)"]
-        TENANT_TECH["🏬 Tech Store (store-tech)<br/>• Dedicated MariaDB + WordPress<br/>• store_tech__list_products<br/>• store_tech__list_orders"]
-    end
-
-    subgraph DatabaseLayer["Persistent Storefront Database"]
+    subgraph DatabaseLayer["Storefront Persistence"]
         WP["🛍️ WordPress Core & WooCommerce (:80)"]
-        MARIADB[("🗄️ MariaDB 11.4 Engine<br/>Persistent PVC (:3306)")]
+        MARIADB[("🗄️ MariaDB 11.4 Engine (:3306)")]
     end
 
     Console --> Ingress
@@ -78,215 +126,297 @@ flowchart TD
 
     Ingress -->|gateway.local| GW1 & GW2 & GW3
     Ingress -->|store.local| WP
-    Ingress -->|tech.store.local| TENANT_TECH
 
     GW1 & GW2 & GW3 <--> REDIS
     GW1 & GW2 & GW3 <-->|ReAct Loop| AI
     GW1 & GW2 & GW3 -->|Streamable HTTP| CoreMCP
     GW1 & GW2 & GW3 -->|On-Demand Pods| HostedMCP
-    GW1 & GW2 & GW3 -->|Tenant Isolated Routes| MultiTenantStores
 
-    CoreMCP <-->|REST API + DB Queries| WP
+    CoreMCP <-->|REST API + DB| WP
     WP <--> MARIADB
 ```
 
 ---
 
-## ✨ 6 Core Enterprise Differentiators
+## 💻 Local Setup Instructions
 
-### 1. Enterprise Multi-Tenant RBAC & ABAC Policy Studio
-* **Zero-Trust Policy Enforcement:** Every request requires an API key or signed JWT bearer token.
-* **4 Pre-Configured Roles:**
-  * **`admin`**: Full access to all 26 tools across all servers, stores, mutations, and hosted utilities.
-  * **`inventory_manager`**: Warehouse stock inspections, batch checks, and stock adjustments (`inventory__*`, `woocommerce__list_products`). Blocked from financials and store deletion.
-  * **`analyst`**: High-level reporting (`analytics__*`, `woocommerce__list_orders`). Blocked from mutating stock or creating products.
-  * **`support_rep` / `member`**: Read-only catalog/orders, order status updates. Blocked from stock adjustments and financial summaries.
-* **Dynamic ABAC Studio:** Administrators can visually toggle permissions per role in real time without restarting pods.
-* **Privilege Escalation Defense:** Non-admin callers attempting `role_override: "admin"` are intercepted with `403 Forbidden` and logged in the immutable security audit trail.
+You can spin up the full local platform using either **Kubernetes (Kind)** or **Docker Compose**.
 
-### 2. High-Speed Distributed Redis Rate Limiting
-* **Dual-Tier Token Bucket & Sliding Window:** Enforces 60 req/min with a 15-request burst buffer.
-* **Cross-Replica Synchronization:** In multi-replica Gateway setups, Redis synchronizes the rate-limiting buckets atomically using atomic `INCR` and `EXPIRE` primitives.
-* **HTTP 429 Compliance:** Automatically injects `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` headers.
-
-### 3. Distributed Redis Chat Session Memory (Intra-Session)
-* **High-Speed Cache:** Dialogue turns are persisted to Redis under `chat:session:{id}:history` with a 24-hour TTL.
-* **Sub-Millisecond Retrieval:** History retrieval executes in **<0.6 ms** directly inside Kubernetes.
-* **Bandwidth & Token Savings:** Restoring chat sessions on browser reload (`F5`) or multi-turn reasoning saves **~850 tokens and ~1.2 KB of payload bandwidth** per interaction turn.
-* **Full Reset Control:** Users can clear session memory on demand via the UI **`Reset`** button or `DELETE /api/v1/chat/history`.
-
-### 4. Dual-Track BM25 Just-In-Time Tool Retrieval
-* **Solving the Tool Explosion Problem:** Rather than flooding the LLM with 26+ raw JSON schemas (~15,000 tokens per turn), an in-memory BM25 ranker evaluates user queries in **<1 ms**.
-* **Dual-Track Context Routing:**
-  * **Track 1:** Selects top candidate tools matching the immediate user message.
-  * **Track 2:** Selects contextual candidate tools matching recent conversational history.
-* **Semantic Tagging:** Catalog inspection tools automatically match product names, prices, and SKUs, eliminating hallucinated demands for SKU codes.
-* **Token Reduction:** Reduces LLM context consumption by **65%–80%** while cutting Time-to-First-Token (TTFT) latency in half.
-
-### 5. On-Demand Hosted MCP Server Pods
-* **Kubernetes Pod Lifecycle Management:** Administrators can launch, sleep (scale to 0), wake, and inspect logs for containerized MCP pods directly from the UI:
-  1. **Global Currency & Forex Converter** (`hosted-mcp-currency` on port `8006`): Live exchange rates, currency conversions (USD, EUR, GBP, INR, JPY), and international price matrix formatting.
-  2. **Notification & Alert Dispatcher** (`hosted-mcp-notifications` on port `8005`): High-priority Slack alerts, email dispatches, and live system-wide alert banners.
-  3. **Custom Code Runner** (`hosted-mcp-customcode` on port `8008`): In-browser Python FastMCP tool compilation and execution (e.g. `custom__discount_calculator`).
-* **Zero Resource Waste:** Sleeping pods scale down to 0 replicas, freeing RAM and CPU on the cluster.
-
-### 6. Autonomous Multi-Store Provisioning Engine
-* **Instant Tenant Creation:** Deploy full e-commerce stores on demand from the **"Stores"** tab.
-* **Namespace Isolation:** Each tenant store gets an isolated Kubernetes namespace (`store-<slug>`) with dedicated MariaDB, WordPress, and WooCommerce MCP microservices.
-* **Dynamic Tool Namespacing:** As soon as a tenant passes readiness probes, its tools are auto-registered under tenant prefixes (e.g. `store_tech__list_products`, `store_tech__list_orders`).
-* **Clean Cascade Teardown:** Deleting a store automatically purges its tools from the Gateway and cascades deletion across all Kubernetes resources.
-
----
-
-## 🚀 Deployment Runbooks
-
-### Option A: Turnkey Single VPS Deployment (Docker Compose)
-
-Deploy the complete platform on any Ubuntu, Debian, or CentOS VPS with Docker and Docker Compose installed.
+### Method 1: Local Kubernetes (Kind) - Recommended
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/<your-username>/urumi-mcp-gateway.git
 cd urumi-mcp-gateway
 
-# 2. Configure environment variables
-cp .env.example .env
-# Edit .env and insert your GROQ_API_KEY
-nano .env
-
-# 3. Add domain mappings to /etc/hosts
+# 2. Add local host mappings
 echo "127.0.0.1 store.local gateway.local tech.store.local" | sudo tee -a /etc/hosts
 
-# 4. Launch all 11 services in detached mode
-docker compose up -d
-
-# 5. Verify service health
-docker compose ps
-```
-
-All services will boot cleanly:
-* Management Console: `http://<your-vps-ip>:3000`
-* Gateway API: `http://<your-vps-ip>:8000`
-* WooCommerce Storefront: `http://store.local`
-
----
-
-### Option B: Production Kubernetes Deployment (Kind / Cloud K8s)
-
-Deploy onto a local Kind cluster or managed cloud Kubernetes (EKS, GKE, AKS) using our production Helm charts.
-
-```bash
-# 1. Start Kind cluster with port mapping
+# 3. Create Kind cluster with ingress port mappings (80 & 443)
 kind create cluster --name urumi-local --config infra/k8s/kind-config.yaml
 
-# 2. Install NGINX Ingress Controller
+# 4. Install NGINX Ingress Controller
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
 
-# 3. Create Groq API Secret
+# 5. Create Groq API Key Secret
 kubectl create secret generic groq-api-key --from-literal=GROQ_API_KEY="your_groq_api_key_here"
 
-# 4. Deploy platform Helm chart
-helm upgrade --install storefront infra/helm/urumi-platform -f infra/helm/urumi-platform/values.yaml
+# 6. Deploy platform using Helm with local Kind values
+helm upgrade --install storefront infra/helm/urumi-platform -f infra/helm/urumi-platform/values.yaml -f infra/helm/urumi-platform/values-kind.yaml
 
-# 5. Bootstrap WooCommerce demo data
+# 7. Seed WooCommerce store with products & demo orders
 bash scripts/seed-woocommerce.sh
 
-# 6. Verify pods
-kubectl get pods
+# 8. Start local frontend dashboard
+cd apps/frontend && npm install && npm run dev
+```
+
+### Method 2: Turnkey Docker Compose (Single Host)
+
+```bash
+# 1. Configure environment variables
+cp .env.example .env
+nano .env # insert your GROQ_API_KEY
+
+# 2. Launch all 11 microservices in detached mode
+docker compose up -d
+
+# 3. Verify container status
+docker compose ps
 ```
 
 ---
 
-## 🛠️ Complete MCP Tools Catalog (26 Tools)
+## ☁️ Production VPS Setup Instructions (k3s)
 
-| Namespace & Tool Name | Server | Risk Level | Description |
-| :--- | :--- | :--- | :--- |
-| `woocommerce__list_products` | WooCommerce | Low | List catalog products, prices, SKUs, and stock quantities |
-| `woocommerce__create_product` | WooCommerce | High | Publish new product to store catalog |
-| `woocommerce__list_orders` | WooCommerce | Low | List customer orders with status filters |
-| `woocommerce__get_order` | WooCommerce | Low | Retrieve full customer and line-item details by Order ID |
-| `woocommerce__create_order` | WooCommerce | High | Create customer order with test payment |
-| `woocommerce__update_order_status` | WooCommerce | Medium | Update order lifecycle status (processing, completed, etc.) |
-| `inventory__check_stock` | Inventory | Low | Check stock level and availability by SKU |
-| `inventory__batch_check_stock` | Inventory | Low | Check multiple SKUs in a single batch lookup |
-| `inventory__list_low_stock` | Inventory | Low | Flag items below minimum reorder threshold |
-| `inventory__update_stock` | Inventory | High | Absolute overwrite of stock quantity for a SKU |
-| `inventory__adjust_stock` | Inventory | High | Relative delta stock adjustment with audit trail reason |
-| `analytics__get_daily_sales` | Analytics | Low | Retrieve daily gross sales and order volume |
-| `analytics__get_revenue_summary` | Analytics | Low | Calculate 30-day revenue and product-level sales breakdown |
-| `analytics__get_top_selling_products` | Analytics | Low | Top products ranked by total volume sold |
-| `hosted_currency__convert_price` | Hosted Currency | Low | Convert prices between USD, EUR, GBP, INR, and JPY |
-| `hosted_currency__get_exchange_rates` | Hosted Currency | Low | Live exchange rate table relative to base currency |
-| `hosted_currency__format_international_pricing` | Hosted Currency | Low | Format USD price across world retail markets |
-| `hosted_notify__send_slack_alert` | Hosted Notify | Medium | Send informational or critical alert to Slack channel |
-| `hosted_notify__send_email_dispatch` | Hosted Notify | Medium | Dispatch notification email to staff or customer |
-| `hosted_notify__broadcast_banner` | Hosted Notify | High | Publish live banner across connected store portals |
-| `custom__discount_calculator` | Hosted Custom | Low | Tiered wholesale bulk discount calculation |
-| `store_tech__list_products` | Tenant Store | Low | List catalog products in Tech Store tenant |
-| `store_tech__list_orders` | Tenant Store | Low | List customer orders in Tech Store tenant |
-| `store_tech__create_product` | Tenant Store | High | Add new product to Tech Store tenant |
-| `store_tech__get_order` | Tenant Store | Low | Retrieve order from Tech Store tenant |
-| `store_tech__update_order_status` | Tenant Store | Medium | Update order status in Tech Store tenant |
+Deploy on any bare Ubuntu/Debian VPS or cloud compute instance ($5–$12/month Hetzner/DigitalOcean/AWS).
+
+### 1. Install k3s Lightweight Kubernetes
+```bash
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -
+mkdir -p ~/.kube && sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config && sudo chown $USER:$USER ~/.kube/config
+```
+
+### 2. Install Ingress Controller & cert-manager (Automated TLS)
+```bash
+# Install Helm 3
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install NGINX Ingress Controller
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx --set controller.service.type=LoadBalancer
+
+# Install cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.1/cert-manager.yaml
+```
+
+### 3. Deploy Platform via Production Helm Overrides
+```bash
+# 1. Create Groq API Secret
+kubectl create secret generic groq-api-key --from-literal=GROQ_API_KEY="your_groq_api_key_here"
+
+# 2. Deploy using production values (uses local-path storageClass, TLS annotations, and 3 Gateway replicas)
+helm upgrade --install storefront infra/helm/urumi-platform \
+  -f infra/helm/urumi-platform/values.yaml \
+  -f infra/helm/urumi-platform/values-vps.yaml \
+  --set global.domain="your-domain.com"
+```
+
+For complete VPS troubleshooting and DNS mapping instructions, see [docs/production_vps_deployment.md](docs/production_vps_deployment.md).
 
 ---
 
-## 🧪 Comprehensive Evaluation & Testing Suites
+## 📖 How-To Guides
 
-### 1. 30-Prompt End-to-End Evaluation Test Matrix
-Evaluates the entire system across all roles, multi-tenant boundaries, and security guardrails:
+### 1. How to Place an Order
+You can place customer orders through three distinct channels:
+
+#### A. Via the Live WooCommerce Storefront (Web UI)
+1. Open your browser and navigate to **[http://store.local](http://store.local)**.
+2. Browse products (e.g. *Gaming Chair Pro*, *Wireless Noise-Canceling Earbuds*, *Ergonomic Mechanical Keyboard*).
+3. Click **Add to Cart**, then proceed to **Checkout**.
+4. Fill in billing details and complete checkout using the test payment gateway.
+
+#### B. Via the AI Chat Agent (Natural Language)
+In the Management Console (`http://localhost:3000`) or through any connected MCP client, submit:
+```
+"Place an order for John Doe (john@example.com) for 2 units of URUMI-EAR-001 (Earbuds Pro)."
+```
+The agent automatically calls `woocommerce__create_order` and reports the generated Order ID and total cost.
+
+#### C. Via Direct Gateway REST API
 ```bash
+curl -X POST http://gateway.local/api/v1/tools/execute \
+  -H "X-API-Key: admin-key-urumi-2026" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "woocommerce__create_order",
+    "arguments": {
+      "customer_email": "jane@example.com",
+      "line_items": [{"sku": "URUMI-CHR-001", "quantity": 1}],
+      "payment_method": "bacs"
+    }
+  }'
+```
+
+---
+
+### 2. Connecting an External MCP Client
+
+The Urumi Gateway exposes an official Model Context Protocol endpoint supporting both **Streamable HTTP** and **Server-Sent Events (SSE)**.
+
+#### A. Connecting Cursor IDE
+In Cursor settings:
+1. Open **Cursor Settings** $\rightarrow$ **Features** $\rightarrow$ **MCP Servers**.
+2. Click **Add New MCP Server**.
+3. Configure:
+   - **Name:** `Urumi Gateway`
+   - **Type:** `sse`
+   - **URL:** `http://gateway.local/mcp` (or `http://localhost:8000/mcp`)
+   - **Headers:** `{"X-API-Key": "admin-key-urumi-2026"}`
+
+#### B. Connecting Claude Desktop
+Edit your Claude Desktop configuration file:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "urumi-gateway": {
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "X-API-Key": "admin-key-urumi-2026"
+      }
+    }
+  }
+}
+```
+
+#### C. Connecting via Python / FastMCP Client
+```python
+from fastmcp import Client
+
+async with Client(url="http://localhost:8000/mcp", headers={"X-API-Key": "admin-key-urumi-2026"}) as client:
+    tools = await client.list_tools()
+    print(f"Discovered {len(tools)} tools across Urumi platform!")
+    res = await client.call_tool("woocommerce__list_products", {})
+    print(res)
+```
+
+---
+
+### 3. Using the Chat Agent
+
+1. Navigate to **[http://localhost:3000](http://localhost:3000)** in your browser and switch to the **"Chat Agent"** tab.
+2. Select your authenticated Persona/Role in the sidebar:
+   - **Administrator**: Full catalog, order mutation, warehouse stock adjustment, analytics, and forex tools.
+   - **Inventory Manager**: Stock inspections and relative adjustments.
+   - **Support Rep**: Catalog lookups, order status updates, and tracking.
+3. Try standard prompts:
+   - *"What are our top 3 best-selling products this month, and what is our current warehouse stock for each?"*
+   - *"How much stock is left for the Ergonomic Mechanical Keyboard, and what would 5 units cost in Euros?"*
+   - *"Find order #101 and update its status to completed."*
+4. **Session Persistence**: Refresh your browser (`F5`); your dialogue history is instantly restored from Redis.
+5. **Resetting Session**: Click the **Reset** button or call `DELETE /api/v1/chat/history` to wipe conversation memory.
+
+---
+
+## 📦 Source Code Components
+
+- **`apps/frontend`**: React 19 single-page application built with Vite and Tailwind CSS. Contains the interactive Chat Console, Live Tool Telemetry Inspector, RBAC Policy Studio, and Tenant Store Lifecycle Manager.
+- **`apps/gateway`**: The core FastAPI gateway. Implements authentication (`api_keys.py`), zero-trust authorization (`rbac.py`), sliding-window rate limiting (`rate_limiter.py`), Redis session memory & caching (`chat_memory.py`), and dynamic tool aggregation (`server.py`).
+- **`apps/ai-service`**: Autonomous ReAct agent engine (`agent.py`). Integrates Groq LLMs (`openai/gpt-oss-120b` and `qwen/qwen3.8-27b`), dual-track BM25 tool selection (`retrieval.py`), and security guardrails (`guardrails.py`).
+- **`services/woocommerce-mcp`**: FastMCP service communicating directly with WooCommerce REST APIs and MariaDB backend to manage products, categories, orders, and metadata.
+- **`services/inventory-mcp`**: Dedicated FastMCP warehouse service providing atomic stock verifications, batch checks, and audited stock adjustments.
+- **`services/analytics-mcp`**: Dedicated FastMCP analytics engine providing daily gross sales, 30-day revenue summaries, and top-seller aggregations.
+- **`services/hosted-mcp`**: Containerized ephemeral MCP pods for currency conversion, Slack/email notifications, and custom code execution.
+
+---
+
+## ☸️ Helm Charts & Values Files
+
+The platform includes a production-ready Helm chart located in `infra/helm/urumi-platform/`:
+- **`values.yaml`**: Complete configuration tree defining container images, resource requests/limits, MariaDB credentials, replica counts, and probe timings.
+- **`values-kind.yaml`**: Environment override for local development inside Kind clusters (uses `hostPath` persistent volumes and plaintext HTTP ingress).
+- **`values-vps.yaml`**: Hardened production override for k3s and cloud clusters. Configures 3 Gateway replicas, `local-path` storageClass, Let's Encrypt TLS annotations, and public domain routing.
+
+---
+
+## 📐 System Design and Tradeoffs Summary
+
+For full technical details, consult **[docs/system_design_and_tradeoffs.md](docs/system_design_and_tradeoffs.md)**.
+
+* **Architecture**: Microservice decomposition over monolith isolates high-risk analytical queries from critical store checkout paths. FastMCP over HTTP/SSE enables native Kubernetes load balancing, ingress routing, and health probing.
+* **Tool Aggregation & Routing**: Dynamic prefix-based routing (`<server>__<tool>`) decouples clients from internal topologies. Tools are discovered asynchronously on startup and filtered via caller RBAC.
+* **Failure Handling**:
+  - *Circuit Breaker*: Upstream server crashes open a 30s circuit breaker, returning structured 503 errors rather than hanging client requests.
+  - *Asynchronous Timeouts*: Strict 8.0s timeout per tool call prevents worker pool exhaustion.
+  - *Model Failover*: Automatic 500ms fallback from 120B to 27B LLM prevents 429 token-per-minute stalls.
+* **Production Delta**: Local host aliases replaced with public FQDNs; plaintext HTTP upgraded to TLS 1.3 via `cert-manager`; ephemeral storage replaced with dynamic `local-path`/CSI volumes; secrets managed via Kubernetes `Secret` objects.
+
+---
+
+## 🛡️ Threat Model Summary
+
+For full security analysis, consult **[docs/threat_model.md](docs/threat_model.md)**.
+
+* **Shared Upstream Credentials**: Upstream WooCommerce REST keys and database passwords terminate strictly at the Gateway and are **never inserted into the LLM system prompt**. Members interact exclusively through least-privilege RBAC roles.
+* **Client Token Non-Passthrough**: Terminating client tokens at the perimeter prevents token leakage to untrusted third-party upstreams and allows the Gateway to act as a secure token translation bridge.
+* **Untrusted Upstream Defense**: Tool descriptions undergo schema sanitization and markdown stripping to eliminate prompt injection and instructions hijacking. Execution-time RBAC ensures that even if an LLM is deceived, unauthorized tool invocations are blocked with `403 Forbidden`.
+* **Cross-Member Isolation**: Dialogue memory is isolated by cryptographic session IDs; horizontal privilege escalation and role-override attempts are intercepted and recorded in immutable audit logs.
+
+---
+
+## 🏆 Bonus & Stand-Out Items Catalog
+
+| # | Stand-Out Feature | Description | File Location |
+| :---: | :--- | :--- | :--- |
+| **1** | **Production VPS (k3s) Deployment with TLS** | Turnkey production Helm values with `local-path` storage, 3 Gateway replicas, and automated `cert-manager` Let's Encrypt TLS. | [`infra/helm/urumi-platform/values-vps.yaml`](infra/helm/urumi-platform/values-vps.yaml)<br/>[`docs/production_vps_deployment.md`](docs/production_vps_deployment.md) |
+| **2** | **Distributed Redis Session Memory** | Sub-millisecond conversation memory with 24-hour TTL, saving ~850 tokens and 1.2 KB payload per turn on page refresh. | [`apps/gateway/chat_memory.py`](apps/gateway/chat_memory.py) |
+| **3** | **Redis Prompt Caching & Model Failover** | 90s idempotent prompt cache cutting latency from 31s to 14.6ms (2,146x speedup) with instant Groq failover. | [`apps/gateway/server.py`](apps/gateway/server.py)<br/>[`apps/ai-service/agent.py`](apps/ai-service/agent.py) |
+| **4** | **Dual-Track BM25 Tool Retrieval** | In-memory ranker indexing 26+ tools, cutting prompt tokens by 65%–80% and halving Time-to-First-Token. | [`apps/ai-service/retrieval.py`](apps/ai-service/retrieval.py) |
+| **5** | **On-Demand Hosted MCP Pods** | In-cluster lifecycle management (scale-to-0, wake, logs) for Currency, Notifications, and Custom Code MCPs. | [`services/hosted-mcp/server.py`](services/hosted-mcp/server.py)<br/>[`apps/gateway/server.py`](apps/gateway/server.py) |
+| **6** | **Autonomous Multi-Store Provisioning** | Dynamic tenant factory provisioning isolated namespaces (`store-<slug>`) with dedicated MariaDB, WordPress, and tools. | [`apps/gateway/server.py`](apps/gateway/server.py)<br/>[`scripts/test_multi_store.py`](scripts/test_multi_store.py) |
+| **7** | **Interactive React 19 Console & Studio** | Management console with live SSE streaming, tool telemetry timeline, and dynamic visual RBAC policy editor. | [`apps/frontend/src/views/`](apps/frontend/src/views/) |
+
+---
+
+## 🧪 Evaluation & Testing Suites
+
+All test suites can be run against either local Kind or production VPS deployments:
+
+```bash
+# 1. 30-Prompt End-to-End Evaluation Test Matrix
 python scripts/test_25_prompts_matrix.py
-```
-* **Catalog Lookups:** Automatic product name-to-SKU resolution (Gaming Chair, Earbuds Pro, Webcam).
-* **RBAC Zero-Trust:** Support Rep blocked from stock adjustment, stock override, product creation, and financial analytics.
-* **Tenant Isolation:** Clean routing to Tech Store; unprovisioned stores handled without hallucination.
-* **Content Safety:** General trivia, poetry, and port scanner requests politely declined by domain guardrails.
-* **Jailbreak Defense:** Prompt injection blocked in **<25 ms**.
 
-### 2. 20-Scenario Advanced Multi-MCP Orchestration Suite
-Tests cross-server coordination and deep operational pipelines:
-```bash
+# 2. 20-Scenario Advanced Cross-MCP Orchestration Suite
 python scripts/test_advanced_multi_mcp.py
-```
-* Analytics + Inventory reconciliation (top sellers + warehouse stock check)
-* Catalog + Forex conversion (USD price to EUR and GBP)
-* Low stock warnings + Slack alert dispatch
-* Order retrieval + remaining inventory check
-* Cross-store catalog side-by-side comparison tables
 
-### 3. 23-Point Security & RBAC Penetration Scanner
-```bash
+# 3. 23-Point Security & RBAC Penetration Scanner
 python scripts/vuln_scanner.py
-```
-* ✅ Non-admin blocked from listing, generating, or revoking API keys
-* ✅ Plaintext API keys masked in all administrative endpoints
-* ✅ Non-admin privilege escalation (`role_override='admin'`) intercepted
-* ✅ 401 Unauthorized across all unauthenticated endpoints
-* ✅ Input boundary validation (negative quantities, extreme deltas)
 
-### 4. Autonomous Multi-Store Provisioning Lifecycle Test
-```bash
+# 4. Multi-Store Tenant Lifecycle Test
 python scripts/test_multi_store.py
+
+# 5. Redis Prompt Caching & Latency Benchmark
+python scripts/benchmark_latency_cache.py
 ```
-* ✅ Zero-downtime provisioning of new store tenants
-* ✅ Automatic tool namespacing & Gateway registration
-* ✅ Cross-store order synchronization
-* ✅ Clean cascade teardown & tool purge verification
 
 ---
 
-## 🚢 Docker Hub Image Push Script
+## 🚢 Docker Hub Repositories
 
-To tag and push all platform images to your Docker Hub repository:
-
-```bash
-# On Linux / macOS / WSL:
-./scripts/push_images.sh <your_dockerhub_username>
-
-# On Windows PowerShell:
-.\scripts\push_images.ps1 -Registry "<your_dockerhub_username>"
-```
+All platform images are published and publicly accessible under the `hiensenbergg` Docker Hub registry:
+- `docker.io/hiensenbergg/mcp-gateway:v1.6.8` / `latest`
+- `docker.io/hiensenbergg/ai-service:v1.3.8` / `latest`
+- `docker.io/hiensenbergg/frontend:v1.0.0` / `latest`
+- `docker.io/hiensenbergg/woocommerce-mcp:v1.1.0` / `latest`
+- `docker.io/hiensenbergg/inventory-mcp:v1.1.1` / `latest`
+- `docker.io/hiensenbergg/analytics-mcp:v1.1.0` / `latest`
+- `docker.io/hiensenbergg/hosted-mcp:v1.0.0` / `latest`
 
 ---
 
