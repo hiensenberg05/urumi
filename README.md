@@ -389,6 +389,69 @@ Prometheus server automatically discovers all Gateway replicas and scrapes metri
 
 ---
 
+## 🛠️ Complete MCP Tools Catalog (28 Tools)
+
+| Namespace & Tool Name | Server | Risk Level | Description |
+| :--- | :--- | :--- | :--- |
+| `woocommerce__list_products` | WooCommerce | Low | List catalog products, prices, SKUs, and stock quantities |
+| `woocommerce__create_product` | WooCommerce | High | Publish new product to store catalog |
+| `woocommerce__list_orders` | WooCommerce | Low | List customer orders with status filters |
+| `woocommerce__get_order` | WooCommerce | Low | Retrieve full customer and line-item details by Order ID |
+| `woocommerce__create_order` | WooCommerce | High | Create customer order with test payment |
+| `woocommerce__update_order_status` | WooCommerce | Medium | Update order lifecycle status (processing, completed, etc.) |
+| `inventory__check_stock` | Inventory | Low | Check stock level and availability by SKU |
+| `inventory__batch_check_stock` | Inventory | Low | Check multiple SKUs in a single batch lookup |
+| `inventory__list_low_stock` | Inventory | Low | Flag items below minimum reorder threshold |
+| `inventory__update_stock` | Inventory | High | Absolute overwrite of stock quantity for a SKU |
+| `inventory__adjust_stock` | Inventory | High | Relative delta stock adjustment with audit trail reason |
+| `analytics__get_daily_sales` | Analytics | Low | Retrieve daily gross sales and order volume |
+| `analytics__get_revenue_summary` | Analytics | Low | Calculate 30-day revenue and product-level sales breakdown |
+| `analytics__get_top_selling_products` | Analytics | Low | Top products ranked by total volume sold |
+| `hosted_currency__convert_price` | Hosted Currency | Low | Convert prices between USD, EUR, GBP, INR, and JPY |
+| `hosted_currency__get_exchange_rates` | Hosted Currency | Low | Live exchange rate table relative to base currency |
+| `hosted_currency__format_international_pricing` | Hosted Currency | Low | Format USD price across world retail markets |
+| `hosted_notify__send_slack_alert` | Hosted Notify | Medium | Send informational or critical alert to Slack channel |
+| `hosted_notify__send_email_dispatch` | Hosted Notify | Medium | Dispatch notification email to staff or customer |
+| `hosted_notify__broadcast_banner` | Hosted Notify | High | Publish live banner across connected store portals |
+| `hosted_shipping__calculate_freight` | Hosted Shipping | Low | Calculate freight logistics rates and transit times |
+| `hosted_shipping__track_shipment` | Hosted Shipping | Low | Track consignment status and transit checkpoints |
+| `custom__discount_calculator` | Hosted Custom | Low | Tiered wholesale bulk discount calculation |
+| `store_tech__list_products` | Tenant Store | Low | List catalog products in Tech Store tenant |
+| `store_tech__list_orders` | Tenant Store | Low | List customer orders in Tech Store tenant |
+| `store_tech__create_product` | Tenant Store | High | Add new product to Tech Store tenant |
+| `store_tech__get_order` | Tenant Store | Low | Retrieve order from Tech Store tenant |
+| `store_tech__update_order_status` | Tenant Store | Medium | Update order status in Tech Store tenant |
+
+---
+
+## 🖥️ React 19 Management Console Architecture
+
+The platform provides a modern, responsive web application (`apps/frontend`) built on **React 19, TypeScript, Vite, and Tailwind CSS**:
+
+1. **Interactive Agent Chat Console**:
+   - Real-time Server-Sent Events (SSE) streaming for streaming LLM tokens.
+   - Dynamic persona switcher allowing operators to switch between `admin`, `inventory_manager`, `analyst`, and `support_rep` to test RBAC boundaries visually.
+   - Dialogue persistence across page refreshes backed by Redis.
+2. **Live Tool Telemetry Inspector**:
+   - Visual execution timeline showing every tool invoked by the agent.
+   - Real-time display of tool execution latency (ms), input parameters, JSON observation payload, and success/error status.
+3. **Visual ABAC Policy Studio**:
+   - Interactive matrix of all 28 tools across all 4 system roles.
+   - Live toggles allowing administrators to grant or revoke specific tool permissions per role at runtime without restarting pods.
+4. **Tenant Stores Lifecycle Manager**:
+   - Complete visual dashboard for provisioning, inspecting, and deleting tenant stores with dynamic health monitoring.
+
+---
+
+## 🌱 Automated Store Seeding & Bootstrap
+
+The platform includes an automated bootstrap script ([`scripts/seed-woocommerce.sh`](scripts/seed-woocommerce.sh)) that initializes WordPress and WooCommerce:
+- **Product Catalog Population**: Seeds standard products (*Gaming Chair Pro*, *Wireless Noise-Canceling Earbuds*, *Ergonomic Mechanical Keyboard*, *4K Webcam Ultra*).
+- **Inventory Thresholds**: Sets real stock counts and low-stock warning levels.
+- **Historical Order Generation**: Creates simulated orders across `processing`, `completed`, and `on-hold` states to validate analytics and BI queries.
+
+---
+
 ## 📦 Source Code Components
 
 - **`apps/frontend`**: React 19 single-page application built with Vite and Tailwind CSS. Contains the interactive Chat Console, Live Tool Telemetry Inspector, RBAC Policy Studio, and Tenant Store Lifecycle Manager.

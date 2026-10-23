@@ -268,6 +268,54 @@ The platform incorporates an autonomous multi-store provisioning engine designed
     \item \textbf{Clean Cascade Teardown}: Deleting a tenant store (\texttt{DELETE /api/v1/stores/\{slug\}}) automatically terminates the tenant namespace, purges persistent volume claims, and revokes the associated MCP tools from the central catalog, verified end-to-end via \texttt{scripts/test\_multi\_store.py}.
 \end{enumerate}
 
+\subsection{Complete Platform MCP Tools Catalog (28 Tools)}
+Table~\ref{tab:tools_catalog} summarizes all 28 tools dynamically aggregated and governed across the platform, including their upstream origin, risk classification, and functional purpose.
+
+\begin{table}[h!]
+\centering
+\footnotesize
+\begin{tabularx}{\textwidth}{p{4.6cm} p{2.5cm} c X}
+\toprule
+\textbf{Namespaced Tool Identifier} & \textbf{Upstream Origin} & \textbf{Risk} & \textbf{Functional Description} \\
+\midrule
+\texttt{woocommerce\_\_list\_products}      & WooCommerce Core & Low    & List products with search, pagination, category, stock. \\
+\texttt{woocommerce\_\_create\_product}    & WooCommerce Core & High   & Publish new catalog product with pricing and SKU. \\
+\texttt{woocommerce\_\_list\_orders}        & WooCommerce Core & Low    & List customer orders with lifecycle status filters. \\
+\texttt{woocommerce\_\_get\_order}          & WooCommerce Core & Low    & Retrieve order items, billing, and customer details. \\
+\texttt{woocommerce\_\_create\_order}       & WooCommerce Core & High   & Place new customer order with simulated payment. \\
+\texttt{woocommerce\_\_update\_order\_status}& WooCommerce Core & Med    & Update order state (processing, completed, etc.). \\
+\addlinespace
+\texttt{inventory\_\_check\_stock}          & Inventory Engine & Low    & Real-time warehouse inventory count for single SKU. \\
+\texttt{inventory\_\_batch\_check\_stock}    & Inventory Engine & Low    & Check stock for up to 50 SKUs in single batch. \\
+\texttt{inventory\_\_list\_low\_stock}      & Inventory Engine & Low    & Flag items below reorder threshold. \\
+\texttt{inventory\_\_update\_stock}         & Inventory Engine & High   & Absolute stock overwrite for a SKU. \\
+\texttt{inventory\_\_adjust\_stock}         & Inventory Engine & High   & Relative stock adjustment with audit reason. \\
+\addlinespace
+\texttt{analytics\_\_get\_daily\_sales}      & Analytics Engine & Low    & Daily gross sales, order volume, and returns. \\
+\texttt{analytics\_\_get\_revenue\_summary}  & Analytics Engine & Low    & Rolling 30-day revenue and AOV breakdown. \\
+\texttt{analytics\_\_get\_top\_selling}     & Analytics Engine & Low    & Top products ranked by volume and revenue. \\
+\addlinespace
+\texttt{hosted\_currency\_\_convert\_price}  & Hosted Forex     & Low    & Convert prices between USD, EUR, GBP, INR, JPY. \\
+\texttt{hosted\_currency\_\_get\_rates}      & Hosted Forex     & Low    & Live exchange rate table relative to base currency. \\
+\texttt{hosted\_currency\_\_format\_pricing} & Hosted Forex     & Low    & Format USD price across international markets. \\
+\texttt{hosted\_notify\_\_send\_slack\_alert}& Hosted Notify    & Med    & Dispatch alert to designated Slack channel. \\
+\texttt{hosted\_notify\_\_send\_email}       & Hosted Notify    & Med    & Dispatch priority notification email. \\
+\texttt{hosted\_notify\_\_broadcast\_banner} & Hosted Notify    & High   & Publish system-wide alert banner across portals. \\
+\texttt{hosted\_shipping\_\_calc\_freight}   & Hosted Shipping  & Low    & Calculate warehouse freight rates and transit days. \\
+\texttt{hosted\_shipping\_\_track\_shipment} & Hosted Shipping  & Low    & Track consignment checkpoints and delivery status. \\
+\texttt{custom\_\_discount\_calculator}     & Sandboxed Python & Low    & Volume-tiered bulk discount calculations. \\
+\addlinespace
+\texttt{store\_tech\_\_list\_products}       & Tech Tenant Store& Low    & Query isolated Tech Store product catalog. \\
+\texttt{store\_tech\_\_list\_orders}         & Tech Tenant Store& Low    & List orders belonging to Tech Store tenant. \\
+\texttt{store\_tech\_\_create\_product}      & Tech Tenant Store& High   & Add new product to Tech Store tenant catalog. \\
+\texttt{store\_tech\_\_get\_order}           & Tech Tenant Store& Low    & Retrieve order from Tech Store tenant. \\
+\texttt{store\_tech\_\_update\_order}        & Tech Tenant Store& Med    & Update order status in Tech Store tenant. \\
+\bottomrule
+\end{tabularx}
+\caption{Comprehensive Platform Model Context Protocol (MCP) Tools Catalog.}
+\label{tab:tools_catalog}
+\end{table}
+
 % ---------------------------------------------------------
 % SECTION 4: GATEWAY INTERNAL ENGINEERING
 % ---------------------------------------------------------
@@ -552,8 +600,39 @@ All 7 platform microservice container images have been compiled using multi-stag
     \item \texttt{hiensenbergg/hosted-mcp:v1.0.0} (Digest: forex \& alerts)
 \end{itemize}
 
+\subsection{Automated Storefront Seeding \& Bootstrap Engine}
+The platform incorporates an automated database bootstrap script (\texttt{scripts/seed-woocommerce.sh}) that initializes MariaDB and WooCommerce upon initial cluster deployment:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Catalog Ingestion}: Seeds standard products including \textit{Gaming Chair Pro} (\texttt{URUMI-CHR-001}), \textit{Wireless Noise-Canceling Earbuds} (\texttt{URUMI-EAR-001}), \textit{Ergonomic Mechanical Keyboard} (\texttt{URUMI-KBD-001}), and \textit{4K Webcam Ultra} (\texttt{URUMI-CAM-001}).
+    \item \textbf{Stock Allocations}: Assigns realistic physical stock levels and sets minimum safety reorder thresholds to exercise inventory warnings.
+    \item \textbf{Order Lifecycle Simulation}: Generates multi-status customer orders (\texttt{processing}, \texttt{completed}, \texttt{on-hold}) with line items to validate business intelligence queries and status transitions.
+\end{itemize}
+
+\subsection{Turnkey Single-Host Deployment (Docker Compose)}
+To enable rapid developer onboarding and single-host VPS evaluation without full Kubernetes infrastructure, the platform provides a production-grade \texttt{docker-compose.yml} wiring all 11 microservices:
+\begin{itemize}[leftmargin=*]
+    \item Internal bridge network (\texttt{urumi-net}) with container DNS resolution.
+    \item Automated health checks (\texttt{healthcheck.test} using curl or mysqladmin) enforcing dependency boot sequencing (\texttt{depends\_on.condition: service\_healthy}).
+    \item Pre-configured port bindings (Frontend: 3000, Gateway: 8000, WooCommerce Storefront: 80, MariaDB: 3306).
+\end{itemize}
+
 % ---------------------------------------------------------
-% SECTION 8: EMPIRICAL BENCHMARKING
+% SECTION 8: FRONTEND MANAGEMENT CONSOLE & POLICY STUDIO
+% ---------------------------------------------------------
+\section{React 19 Enterprise Management Console and Policy Studio}
+
+\subsection{Architectural Foundations: React 19, Vite, and Tailwind CSS}
+The platform frontend (\texttt{apps/frontend}) is engineered as a high-performance Single-Page Application (SPA) leveraging React 19, TypeScript, Vite, and Tailwind CSS. The interface provides four specialized operational workspaces:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Interactive Agent Chat Console}: Provides real-time Server-Sent Events (SSE) streaming, rendering LLM reasoning and markdown responses progressively as tokens are generated. An embedded persona switcher allows operators to switch between \texttt{admin}, \texttt{inventory\_manager}, \texttt{analyst}, and \texttt{support\_rep} to validate RBAC boundaries visually.
+    \item \textbf{Live Tool Execution Telemetry Inspector}: Displays an interactive visual execution timeline for every tool invoked during a ReAct loop. Operators can inspect input JSON arguments, raw observation payloads, execution duration (ms), and HTTP status codes in real time.
+    \item \textbf{Visual ABAC Policy Studio}: Renders an interactive matrix of all 28 tools across all 4 system roles. Administrators can toggle tool permissions on the fly with instantaneous REST API synchronization, eliminating the need to restart Gateway pods.
+    \item \textbf{Multi-Store Tenant Management Console}: Visual control plane to provision new store namespaces, monitor readiness probes, and execute cascade teardowns.
+\end{enumerate}
+
+% ---------------------------------------------------------
+% SECTION 9: EMPIRICAL BENCHMARKING
 % ---------------------------------------------------------
 \section{Empirical Performance Benchmarking}
 \label{sec:benchmarks}
@@ -611,16 +690,27 @@ Automated script \texttt{scripts/test\_advanced\_multi\_mcp.py} validated cross-
 \end{itemize}
 
 \subsection{23-Point Security \& RBAC Penetration Scanner}
-Automated vulnerability scanner \texttt{scripts/vuln\_scanner.py} validated 23 security criteria:
+The platform incorporates an automated penetration testing suite (\texttt{scripts/vuln\_scanner.py}) executing 23 comprehensive vulnerability checks against the running cluster:
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Credential Protection \& Masking}: Verifies that administrative endpoints mask plaintext API keys (e.g., \texttt{adm-****-2026}) and redact sensitive database environment variables.
+    \item \textbf{Privilege Escalation Interception}: Confirms that non-admin callers submitting payload overrides (\texttt{role\_override="admin"}) are intercepted with \texttt{403 Forbidden} and logged as security incidents.
+    \item \textbf{Input Boundary Validation}: Verifies strict rejection of negative stock quantities, extreme adjustments, and malformed SKU parameters.
+    \item \textbf{Unauthenticated Perimeter Defense}: Asserts that 100\% of protected API endpoints enforce \texttt{401 Unauthorized} when callers provide invalid or missing API keys.
+    \item \textbf{Administrative Endpoint Isolation}: Ensures non-admin accounts cannot list, generate, or revoke tenant API keys or modify ABAC policy definitions.
+\end{enumerate}
+
+\subsection{Autonomous Multi-Store Tenant Lifecycle Verification}
+The multi-store provisioning engine was verified end-to-end via \texttt{scripts/test\_multi\_store.py}:
 \begin{itemize}[leftmargin=*]
-    \item Masking of plaintext API keys in administrative endpoints.
-    \item Strict blocking of non-admin role overrides (\texttt{role\_override="admin"}).
-    \item Rejection of negative stock adjustments and extreme parameter values.
-    \item 100\% enforcement of HTTP 401 Unauthorized across all unauthenticated endpoints.
+    \item \textbf{Automated Provisioning}: Zero-downtime deployment of tenant store namespace (\texttt{store-tech}) with isolated MariaDB and WordPress pods.
+    \item \textbf{Readiness Gating}: Probing ensures the store passes Kubernetes readiness probes before tool registration.
+    \item \textbf{Dynamic Prefix Aggregation}: Gateway auto-registers \texttt{store\_tech\_\_list\_products} and \texttt{store\_tech\_\_list\_orders}.
+    \item \textbf{Cross-Store Synchronization}: Validated independent order creation and stock management without cross-tenant bleed.
+    \item \textbf{Cascade Teardown Verification}: Complete namespace purge and automatic revocation of tenant tools from Gateway routing tables.
 \end{itemize}
 
 % ---------------------------------------------------------
-% SECTION 10: CONCLUSION & STAND-OUT DELIVERABLES
+% SECTION 11: CONCLUSION & STAND-OUT DELIVERABLES
 % ---------------------------------------------------------
 \section{Conclusion and Stand-Out Bonus Deliverables}
 
@@ -633,7 +723,7 @@ The Urumi Enterprise MCP Gateway successfully satisfies all core criteria and bo
     \item \textbf{Deliverable 4 (System Design Note)}: Comprehensive architecture and tradeoffs note (\texttt{docs/system\_design\_and\_tradeoffs.md}).
     \item \textbf{Deliverable 5 (Threat Model)}: Complete security threat model note (\texttt{docs/threat\_model.md}).
     \item \textbf{Deliverable 6 (Stand-Out Bonus Items)}: Catalog of advanced platform capabilities.
-    \item \textbf{Deliverable 7 (Submission Report)}: This 15-page formal walkthrough report in LaTeX format.
+    \item \textbf{Deliverable 7 (Submission Report)}: This 18-page formal walkthrough report in LaTeX format.
 \end{itemize}
 
 \subsection{Catalog of Stand-Out Features}

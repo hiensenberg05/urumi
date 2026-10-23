@@ -57,6 +57,22 @@ This document outlines the architectural decisions, design tradeoffs, runtime ro
 * **Tradeoffs**:
   - Requires maintaining up-to-date semantic tags and keywords for tools to avoid false-negative exclusions on unusual queries.
 
+### 1.6 Frontend Architecture: React 19 Single-Page App with Server-Sent Events (SSE)
+* **Choice**: React 19 + Vite + Tailwind CSS communicating with the Gateway via REST and Server-Sent Events (SSE) rather than bidirectional WebSockets or server-side rendering (Next.js).
+* **Why**:
+  - Unidirectional streaming (SSE) matches LLM generation natively: tokens stream down as they are synthesized without the connection keep-alive complexity of WebSockets.
+  - Static SPA assets can be packaged into a lightweight Alpine NGINX container (18MB) or served directly via Vite, decoupling frontend availability from node.js backend runtimes.
+* **Tradeoffs**:
+  - Browser-only rendering requires client-side execution; mitigated by Vite code splitting and sub-50ms bundle execution.
+
+### 1.7 Turnkey Local Mesh: 11-Service Docker Compose vs. Bare Daemons
+* **Choice**: Orchestrate all 11 microservices (Gateway, AI Service, Frontend, MariaDB, WordPress, 3 Core MCPs, 3 Hosted MCPs) via `docker-compose.yml` with health check condition gates.
+* **Why**:
+  - Eliminates host runtime discrepancies (Python version conflicts, Node.js mismatches, MariaDB port conflicts).
+  - Enforces dependency boot sequencing (`depends_on.condition: service_healthy`) so MCP servers never attempt to connect to WordPress before MariaDB finishes initializing.
+* **Tradeoffs**:
+  - Docker daemon memory overhead (~2.5GB for all containers); mitigated by lean Alpine base images.
+
 ---
 
 ## 2. Tool Aggregation, Dynamic Routing, and Failure Handling
