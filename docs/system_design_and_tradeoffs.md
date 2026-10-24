@@ -212,7 +212,33 @@ To prevent drift, the platform uses a single unified Helm chart (`infra/helm/uru
 
 ---
 
-## 4. Summary of Design Benefits
+## 4. Architectural Audit Fixes & Tradeoffs
+
+In preparation for final production readiness, five critical architectural tradeoffs were evaluated and addressed:
+
+### 4.1 Secret Management: Static Values vs. Dynamic Generation
+* **Tradeoff**: Committing default passwords simplifies local developer bootstrapping but risks accidental leakage in production environments.
+* **Resolution**: In `infra/helm/urumi-platform`, all committed passwords and API keys were stripped from `values.yaml`. Templates utilize `default (randAlphaNum 24)` to dynamically generate secure credentials if omitted, while code-level fallbacks use `secrets.token_hex(32)`.
+
+### 4.2 API-Key State: Ephemeral Process Memory vs. Distributed Shared Store
+* **Tradeoff**: In-memory Python dictionaries offer zero-latency key verification ($O(1)$) but lose runtime keys on pod restarts and desynchronize in multi-replica deployments.
+* **Resolution**: Implemented `ApiKeyStore` using a hybrid two-tier model: a local write-through memory cache backed by a distributed Redis database (`apikeys:meta:{id}`). This achieves microsecond-level local read speeds while guaranteeing cross-replica consistency and pod crash durability.
+
+### 4.3 CORS Policy: Permissive Development vs. Strict W3C Compliance
+* **Tradeoff**: `allow_origins=["*"]` allows easy local testing from any dev server port, but W3C standards strictly forbid `allow_origins=["*"]` when `allow_credentials=True`.
+* **Resolution**: Restricted allowed origins to explicit dashboard domains (`http://localhost:3000`, `http://store.local`, `http://dashboard.local`) with regex support, fully honoring W3C browser security.
+
+### 4.4 Rate Limiter Mechanics: Fixed Window vs. Sliding-Window Log & CP/AP Fallback
+* **Tradeoff**: Fixed-window counters (`INCR ratelimit:{key}:{minute}`) are computationally simple but vulnerable to 2x boundary bursts. True sliding-window logs (`ZREMRANGEBYSCORE` + `ZCARD`) require sorted-set storage overhead.
+* **Resolution**: Upgraded to a Redis sorted-set sliding-window log (`ratelimit:sliding:{key}`) for strict boundary enforcement. To address network partitions (CAP theorem), the limiter adopts a CP/AP hybrid strategy: strong cluster consistency (CP) via Redis under normal conditions, with automatic fallback to per-pod local token buckets (AP) during Redis outages to maintain 100% gateway availability.
+
+### 4.5 Multi-Tenant Authorization: Base Role Mapping vs. Perimeter Store Ownership
+* **Tradeoff**: Normalizing tenant tool names (`store_tech__list_orders` -> `woocommerce__list_orders`) simplifies RBAC role definitions but allows cross-tenant data leakage if store ownership is not independently verified.
+* **Resolution**: Enforced two-phase authorization: the Gateway first validates tenant store ownership (`principal.can_access_store(tenant)`) at the perimeter, then evaluates functional role permissions.
+
+---
+
+## 5. Summary of Design Benefits
 1. **Security Perimeter**: Model clients never touch raw database credentials; every call is gated by RBAC, rate limits, and audit logs.
 2. **Operational Resilience**: Microservice isolation, circuit breakers, and automatic LLM failover guarantee high availability.
 3. **Cost Efficiency**: Dual-track BM25 tool selection and Redis prompt caching cut LLM token consumption by over 65% and speed up responses by up to 2,000x.

@@ -24,6 +24,15 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         "analytics__get_daily_sales",
         "analytics__get_revenue_summary",
         "analytics__get_top_selling_products",
+        "hosted_currency__convert_price",
+        "hosted_currency__get_exchange_rates",
+        "hosted_currency__format_international_pricing",
+        "hosted_notify__send_slack_alert",
+        "hosted_notify__send_email_dispatch",
+        "hosted_notify__broadcast_banner",
+        "hosted_shipping__calculate_freight",
+        "hosted_shipping__track_shipment",
+        "custom__discount_calculator",
     },
     ROLE_INVENTORY_MANAGER: {
         "inventory__check_stock",
@@ -33,6 +42,11 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         "inventory__adjust_stock",
         "woocommerce__list_products",
         "woocommerce__list_orders",
+        "hosted_currency__convert_price",
+        "hosted_currency__get_exchange_rates",
+        "hosted_currency__format_international_pricing",
+        "hosted_notify__send_slack_alert",
+        "custom__discount_calculator",
     },
     ROLE_ANALYST: {
         "analytics__get_daily_sales",
@@ -40,13 +54,21 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         "analytics__get_top_selling_products",
         "woocommerce__list_products",
         "woocommerce__list_orders",
+        "hosted_currency__convert_price",
+        "hosted_currency__get_exchange_rates",
+        "hosted_currency__format_international_pricing",
+        "custom__discount_calculator",
     },
     ROLE_SUPPORT_REP: {
+        "woocommerce__list_products",
         "woocommerce__list_orders",
         "woocommerce__get_order",
+        "woocommerce__create_order",
         "woocommerce__update_order_status",
         "inventory__check_stock",
-        "inventory__batch_check_stock",
+        "hosted_currency__convert_price",
+        "hosted_currency__get_exchange_rates",
+        "hosted_currency__format_international_pricing",
     },
 }
 
@@ -65,7 +87,43 @@ TOOL_RISK_PROFILES: Dict[str, str] = {
     "analytics__get_daily_sales": "Medium (Read Aggregate)",
     "analytics__get_revenue_summary": "Critical (Financial Impact)",
     "analytics__get_top_selling_products": "Medium (Read Aggregate)",
+    "hosted_currency__convert_price": "Low (Read-only)",
+    "hosted_currency__get_exchange_rates": "Low (Read-only)",
+    "hosted_currency__format_international_pricing": "Low (Read-only)",
+    "hosted_notify__send_slack_alert": "Medium (Alert Dispatch)",
+    "hosted_notify__send_email_dispatch": "Medium (Notification)",
+    "hosted_notify__broadcast_banner": "High (Platform-wide)",
+    "hosted_shipping__calculate_freight": "Low (Read-only)",
+    "hosted_shipping__track_shipment": "Low (Read-only)",
+    "custom__discount_calculator": "Low (Compute)",
 }
+
+def extract_tenant_from_tool(tool_name: str) -> Optional[str]:
+    """
+    Extract tenant store slug from a namespaced tool name.
+    Example: 'store_tech__list_orders' -> 'tech'
+             'woocommerce__list_orders' -> None (default store)
+    """
+    if tool_name.startswith("store_") and "__" in tool_name:
+        prefix = tool_name.split("__", 1)[0]
+        return prefix.replace("store_", "", 1)
+    return None
+
+def is_tenant_authorized(allowed_stores: Optional[List[str]], role: str, tenant_slug: Optional[str]) -> bool:
+    """
+    Verify whether the caller is entitled to access the specific store tenant.
+    Enforces multi-tenant ownership boundaries independently of base role permissions.
+    """
+    if not tenant_slug:
+        # Standard default store tools (woocommerce__*)
+        return True
+    if role == ROLE_ADMIN:
+        return True
+    if not allowed_stores:
+        return False
+    if "*" in allowed_stores:
+        return True
+    return tenant_slug.lower() in [s.lower() for s in allowed_stores]
 
 def _normalize_tool_for_rbac(tool_name: str) -> str:
     """Normalize dynamic tenant tool names (e.g. store_fashion__list_orders) to base tool (woocommerce__list_orders)."""
@@ -74,8 +132,23 @@ def _normalize_tool_for_rbac(tool_name: str) -> str:
         return f"woocommerce__{action}"
     return tool_name
 
-def is_tool_allowed(role: str, tool_name: str) -> bool:
-    """Check if the given role has permission to invoke the tool."""
+def is_tool_allowed(
+    role: str,
+    tool_name: str,
+    allowed_stores: Optional[List[str]] = None,
+) -> bool:
+    """
+    Check if the given role and tenant permissions permit invoking the tool.
+    Enforces BOTH:
+    1. Tenant store ownership / entitlement.
+    2. Granular role-based capability for the action.
+    """
+    # 1. Tenant ownership verification
+    tenant = extract_tenant_from_tool(tool_name)
+    if tenant and not is_tenant_authorized(allowed_stores, role, tenant):
+        return False
+
+    # 2. Base role capability verification
     if role == ROLE_ADMIN:
         return True
     allowed = ROLE_PERMISSIONS.get(role, set())
@@ -84,16 +157,17 @@ def is_tool_allowed(role: str, tool_name: str) -> bool:
     normalized = _normalize_tool_for_rbac(tool_name)
     return normalized in allowed
 
-def filter_allowed_tools(role: str, all_tool_names: List[str]) -> List[str]:
-    """Filter list of tools to only those permitted for the role."""
-    if role == ROLE_ADMIN:
-        return all_tool_names
-    allowed = ROLE_PERMISSIONS.get(role, set())
+def filter_allowed_tools(
+    role: str,
+    all_tool_names: List[str],
+    allowed_stores: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Filter list of tools to only those permitted for the role AND authorized for the caller's tenant stores.
+    """
     result = []
     for t in all_tool_names:
-        if t in allowed:
-            result.append(t)
-        elif _normalize_tool_for_rbac(t) in allowed:
+        if is_tool_allowed(role, t, allowed_stores):
             result.append(t)
     return result
 

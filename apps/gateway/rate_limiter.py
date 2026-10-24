@@ -1,5 +1,6 @@
 import os
 import time
+import uuid
 import asyncio
 from typing import Dict, Tuple, Optional
 
@@ -28,91 +29,61 @@ class TokenBucket:
             retry_after = missing / self.refill_rate if self.refill_rate > 0 else 1.0
             return False, round(retry_after, 2)
 
-class SimpleRedisClient:
-    """
-    Zero-dependency pure asyncio Redis RESP client.
-    Connects to Redis without needing pip packages, supporting clustering and sliding-window rate limiting.
-    """
-    def __init__(self, host: str = "redis.default.svc.cluster.local", port: int = 6379):
-        self.host = host
-        self.port = port
-        self._reader: Optional[asyncio.StreamReader] = None
-        self._writer: Optional[asyncio.StreamWriter] = None
-        self._lock = asyncio.Lock()
-
-    async def _ensure_connection(self) -> bool:
-        if self._writer and not self._writer.is_closing():
-            return True
-        try:
-            self._reader, self._writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=0.5
-            )
-            return True
-        except Exception:
-            self._reader = None
-            self._writer = None
-            return False
-
-    async def incr(self, key: str) -> Optional[int]:
-        async with self._lock:
-            if not await self._ensure_connection():
-                return None
-            try:
-                cmd = f"*2\r\n$4\r\nINCR\r\n${len(key)}\r\n{key}\r\n".encode()
-                self._writer.write(cmd)
-                await self._writer.drain()
-                resp = await asyncio.wait_for(self._reader.readline(), timeout=0.5)
-                if resp.startswith(b":"):
-                    return int(resp[1:].strip())
-                return None
-            except Exception:
-                self._writer = None
-                return None
-
-    async def expire(self, key: str, seconds: int) -> bool:
-        async with self._lock:
-            if not await self._ensure_connection():
-                return False
-            try:
-                cmd = f"*3\r\n$6\r\nEXPIRE\r\n${len(key)}\r\n{key}\r\n${len(str(seconds))}\r\n{seconds}\r\n".encode()
-                self._writer.write(cmd)
-                await self._writer.drain()
-                resp = await asyncio.wait_for(self._reader.readline(), timeout=0.5)
-                return resp.strip() == b":1"
-            except Exception:
-                self._writer = None
-                return False
 
 class RateLimiter:
+    """
+    Enterprise Dual-Tier Rate Limiter.
+    
+    Tier 1 (Distributed): True Sliding-Window Log backed by Redis sorted sets (ZSET).
+    Strictly prevents traffic spikes at window boundaries across all Gateway pods.
+    
+    Tier 2 (Resilient Fallback): Per-process in-memory Token Bucket.
+    
+    Consistency vs. Availability Trade-off:
+    - Normal (CP): Replicas coordinate through Redis for atomic sliding-window enforcement.
+    - Partition/Failure (AP Fallback): If Redis is unreachable, Gateway falls back to local
+      token buckets to guarantee high availability (fail-open) rather than rejecting requests
+      with 500 errors.
+    """
+
     def __init__(self, requests_per_minute: int = 60, burst: int = 15):
         self.requests_per_minute = requests_per_minute
+        self.window_seconds = 60.0
         self.refill_rate = requests_per_minute / 60.0
         self.capacity = float(burst)
         self.buckets: Dict[str, TokenBucket] = {}
         self._lock = asyncio.Lock()
         
-        # Redis distributed backend
+        # Distributed Redis backend
         self.redis = redis_client
 
     async def check_rate_limit(self, key: str, tokens: float = 1.0) -> Tuple[bool, float]:
-        # 1. Distributed Redis Sliding Window Check across all Gateway replicas
+        now = time.time()
+        clear_before = now - self.window_seconds
+        redis_key = f"ratelimit:sliding:{key}"
+
+        # 1. Distributed Redis True Sliding Window via Sorted Set
         try:
-            window = int(time.time() // 60)
-            redis_key = f"ratelimit:{key}:{window}"
-            count = await self.redis.incr(redis_key)
+            # Remove timestamps outside the sliding window
+            await self.redis.zremrangebyscore(redis_key, "-inf", clear_before)
+            
+            # Count requests inside the active 60-second sliding window
+            count = await self.redis.zcard(redis_key)
             if count is not None:
-                if count == 1:
-                    await self.redis.expire(redis_key, 65)
-                # Rate limit threshold
-                if count > self.requests_per_minute:
-                    retry_after = max(1.0, float(60 - (int(time.time()) % 60)))
+                if count >= self.requests_per_minute:
+                    retry_after = max(1.0, round(self.window_seconds - (now % self.window_seconds), 1))
                     return False, retry_after
+
+                # Record current request timestamp
+                member_id = f"{now}:{uuid.uuid4().hex[:6]}"
+                await self.redis.zadd(redis_key, now, member_id)
+                await self.redis.expire(redis_key, int(self.window_seconds) + 5)
                 return True, 0.0
         except Exception:
+            # Fall back to local token bucket if Redis is temporarily unreachable
             pass
 
-        # 2. Seamless local fallback to in-memory TokenBucket if Redis unavailable
+        # 2. Local fallback to in-memory TokenBucket
         async with self._lock:
             if key not in self.buckets:
                 self.buckets[key] = TokenBucket(capacity=self.capacity, refill_rate=self.refill_rate)

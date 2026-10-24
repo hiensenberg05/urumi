@@ -4,8 +4,10 @@ Provides authenticated symmetric encryption (Fernet / AES-128-CBC + HMAC-SHA256)
 for upstream MCP credentials (bearer tokens, API keys, basic auth secrets) stored at rest.
 """
 
+import os
 import base64
 import hashlib
+import secrets
 from typing import Optional
 from cryptography.fernet import Fernet
 from config import settings
@@ -17,7 +19,7 @@ def _derive_fernet_key(secret: str) -> bytes:
 
 class CredentialVault:
     def __init__(self, master_key: Optional[str] = None):
-        key_source = master_key or getattr(settings, "jwt_secret", "urumi-mcp-gateway-super-secret-jwt-key-2026")
+        key_source = master_key or os.environ.get("GATEWAY_MASTER_KEY") or os.environ.get("JWT_SECRET") or secrets.token_hex(32)
         self._fernet = Fernet(_derive_fernet_key(key_source))
 
     def encrypt(self, plaintext: str) -> str:

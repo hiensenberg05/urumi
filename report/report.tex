@@ -548,6 +548,45 @@ Table~\ref{tab:rbac_matrix} delineates the granular permission boundaries enforc
 \label{tab:rbac_matrix}
 \end{table}
 
+\subsection{Production Security Hardening and Audit Compliance}
+Prior to final submission, the Urumi platform underwent a comprehensive security and architectural audit addressing five critical enterprise requirements:
+
+\subsubsection{1. Remediation of Hardcoded Credentials and Insecure Defaults}
+All static secrets and insecure default credentials committed to repository configuration have been systematically eliminated:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Helm Values Sanitization}: In \texttt{infra/helm/urumi-platform/values.yaml}, static passwords (\texttt{wp\_secure\_password\_123}, \texttt{mariadb\_root\_password\_123}, and static WooCommerce REST keys) have been cleared. Helm template manifests (\texttt{mariadb-secret.yaml}, \texttt{wordpress-secret.yaml}) now utilize \texttt{default (randAlphaNum 24)} logic, generating high-entropy cryptographic strings during chart deployment if external values are omitted.
+    \item \textbf{Dynamic In-Code Secret Generation}: Hardcoded fallback strings in \texttt{apps/gateway/jwt\_auth.py} and \texttt{apps/gateway/crypto\_vault.py} have been replaced with dynamic runtime entropy via Python's \texttt{secrets.token\_hex(32)}. If production environment variables are not supplied, the gateway safely provisions unpredictable ephemerally secure keys rather than defaulting to static committed strings.
+    \item \textbf{Docker Compose Mandatory Envs}: \texttt{docker-compose.yml} enforces environment variable injection using POSIX error expansions (\texttt{\$\{MARIADB\_ROOT\_PASSWORD:?error\}}), preventing containers from booting with default credentials.
+\end{itemize}
+
+\subsubsection{2. Distributed API Key Persistence and Multi-Replica Consistency}
+In earlier iterations, runtime API keys were stored in an in-memory dictionary within the gateway process. In a distributed multi-replica Kubernetes cluster, this resulted in key divergence across pods and lost keys during pod restarts.
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Redis-Backed Key Store}: The gateway now employs \texttt{ApiKeyStore} (\texttt{apps/gateway/api\_keys\_store.py}), which persists API keys across the shared Redis cluster using dual-indexing: \texttt{apikeys:meta:\{id\}} for metadata, \texttt{apikeys:lookup:\{sha256\_hash\}} for constant-time credential resolution, and an \texttt{apikeys:all} set for enumeration.
+    \item \textbf{Two-Tier Caching Architecture}: A local in-memory write-through cache provides sub-millisecond key verification on hot paths, while Redis replication ensures immediate key availability and instantaneous revocation across all Gateway replicas.
+\end{itemize}
+
+\subsubsection{3. Strict W3C-Compliant CORS Configuration}
+The initial configuration utilized \texttt{allow\_origins=["*"]} in conjunction with \texttt{allow\_credentials=True}. Under the W3C Cross-Origin Resource Sharing standard, browsers reject credentialed requests that specify a wildcard origin. More critically, wildcard CORS exposes administrative gateway endpoints to cross-site request forgery from arbitrary malicious origins.
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Explicit Origin Whitelisting}: The Gateway now enforces a strict CORS policy binding allowed origins to explicit dashboard domains (\texttt{http://localhost:3000}, \texttt{http://127.0.0.1:3000}, \texttt{http://store.local}, \texttt{http://dashboard.local}), with regex validation (\texttt{allow\_origin\_regex}) for secure local cluster hostnames.
+    \item \textbf{Configurable Origin Scoping}: Production VPS deployments override allowed origins via the \texttt{ALLOWED\_ORIGINS} environment variable, ensuring zero cross-origin leakage.
+\end{itemize}
+
+\subsubsection{4. Distributed Sliding-Window Rate Limiting and CP/AP Consistency Trade-Off}
+The rate limiting engine in \texttt{apps/gateway/rate\_limiter.py} was upgraded from a fixed-window minute counter to a true distributed sliding-window log backed by Redis sorted sets (\texttt{ratelimit:sliding:\{key\}}):
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Sliding-Window Log Mechanics}: For each incoming request, the gateway prunes timestamped scores older than $(t_{\text{now}} - 60\text{s})$ using \texttt{ZREMRANGEBYSCORE}, counts the remaining requests in the window via \texttt{ZCARD}, and conditionally appends the current timestamp with \texttt{ZADD}. This prevents ``boundary burst'' attacks where a client doubles their throughput by sending requests across minute boundaries.
+    \item \textbf{Consistency vs. Availability (CP vs. AP) Trade-Off}: Under normal network conditions, the distributed Redis sliding window guarantees strong consistency (CP) across all gateway replicas. If the Redis cluster becomes partitioned or temporarily unreachable, the gateway automatically falls back to local per-pod in-memory token buckets (AP). This deliberate architectural trade-off prioritizes platform availability and zero customer downtime over absolute cluster-wide rate consistency during infrastructure outages.
+\end{itemize}
+
+\subsubsection{5. Multi-Tenant Store Ownership Isolation}
+In multi-store architectures, tool names are prefixed dynamically (e.g., \texttt{store\_tech\_\_list\_orders}, \texttt{store\_fashion\_\_update\_stock}). While RBAC normalizes these to base actions (\texttt{woocommerce\_\_list\_orders}) to evaluate functional role permissions, role equivalence does not establish store tenant entitlement:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Perimeter Tenant Ownership Verification}: The gateway extracts the target tenant slug via \texttt{extract\_tenant\_from\_tool(tool\_name)} and evaluates tenant entitlement (\texttt{principal.can\_access\_store(tenant)}) before evaluating role permissions.
+    \item \textbf{Cross-Tenant Lateral Isolation}: A caller holding an API key scoped to \texttt{allowed\_stores: ["fashion"]} is strictly rejected with \texttt{403 Forbidden} if they attempt to invoke tools on \texttt{store\_tech}, even if their role permits the underlying action. Only administrators with wildcard permissions (\texttt{["*"]}) can cross tenant boundaries.
+\end{itemize}
+
 % ---------------------------------------------------------
 % SECTION 7: KUBERNETES & PRODUCTION INFRASTRUCTURE
 % ---------------------------------------------------------

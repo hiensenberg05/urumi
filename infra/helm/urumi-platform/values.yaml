@@ -11,8 +11,9 @@ storefront:
       pullPolicy: IfNotPresent
     database: wordpress
     user: wordpress
-    password: "wp_secure_password_123"
-    rootPassword: "mariadb_root_password_123"
+    # Insecure default credentials removed. Set via --set in CI/CD or generate randomly:
+    password: ""
+    rootPassword: ""
     storage: 2Gi
     resources:
       requests:
@@ -28,7 +29,8 @@ storefront:
       tag: "6.7-php8.2-apache"
       pullPolicy: IfNotPresent
     adminUser: admin
-    adminPassword: "AdminPassword123!"
+    # Insecure default credentials removed. Set via --set in CI/CD or generate randomly:
+    adminPassword: ""
     adminEmail: "admin@urumi.local"
     siteTitle: "Urumi WooCommerce Store"
     siteUrl: "http://store.local"
@@ -42,8 +44,9 @@ storefront:
         memory: 1Gi
 
   woocommerce:
-    consumerKey: "ck_98fbc18596f264871d8717904e5d61483acfb0a1"
-    consumerSecret: "cs_12cda47b1981cb02720b08051a8bc8f895f3b7d1"
+    # Production credentials must be supplied via Kubernetes Secrets or Helm --set
+    consumerKey: ""
+    consumerSecret: ""
 
   ingress:
     enabled: true

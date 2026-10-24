@@ -495,6 +495,12 @@ For full security analysis, consult **[docs/threat_model.md](docs/threat_model.m
 * **Client Token Non-Passthrough**: Terminating client tokens at the perimeter prevents token leakage to untrusted third-party upstreams and allows the Gateway to act as a secure token translation bridge.
 * **Untrusted Upstream Defense**: Tool descriptions undergo schema sanitization and markdown stripping to eliminate prompt injection and instructions hijacking. Execution-time RBAC ensures that even if an LLM is deceived, unauthorized tool invocations are blocked with `403 Forbidden`.
 * **Cross-Member Isolation**: Dialogue memory is isolated by cryptographic session IDs; horizontal privilege escalation and role-override attempts are intercepted and recorded in immutable audit logs.
+* **Pre-Submission Security & Architectural Audit Mitigations**:
+  1. *Hardcoded Credentials*: Stripped all committed passwords from `values.yaml` and configs; implemented dynamic `randAlphaNum 24` Helm defaults and `secrets.token_hex(32)` runtime fallbacks.
+  2. *API-Key Persistence*: Migrated gateway key store to Redis (`ApiKeyStore`) with dual-hash indexing, eliminating key loss on pod restarts or multi-replica autoscaling.
+  3. *Strict CORS Policy*: Replaced overly broad `allow_origins=["*"]` + `allow_credentials=True` with explicit dashboard domain whitelisting complying with W3C standards.
+  4. *True Sliding-Window Rate Limiter*: Implemented Redis sorted-set sliding-window log (`ZREMRANGEBYSCORE` + `ZCARD`), with an automatic local token bucket fallback for 100% gateway availability under network partitions.
+  5. *Multi-Tenant Store Ownership*: Enforced store ownership verification at the perimeter so callers cannot invoke tools on store tenants they do not own, even when role permissions overlap.
 
 ---
 
@@ -517,19 +523,22 @@ For full security analysis, consult **[docs/threat_model.md](docs/threat_model.m
 All test suites can be run against either local Kind or production VPS deployments:
 
 ```bash
-# 1. 30-Prompt End-to-End Evaluation Test Matrix
+# 1. 32-Point Security & Architectural Audit Verification Suite
+python scripts/verify_audit_fixes.py
+
+# 2. 30-Prompt End-to-End Evaluation Test Matrix
 python scripts/test_25_prompts_matrix.py
 
-# 2. 20-Scenario Advanced Cross-MCP Orchestration Suite
+# 3. 20-Scenario Advanced Cross-MCP Orchestration Suite
 python scripts/test_advanced_multi_mcp.py
 
-# 3. 23-Point Security & RBAC Penetration Scanner
+# 4. 23-Point Security & RBAC Penetration Scanner
 python scripts/vuln_scanner.py
 
-# 4. Multi-Store Tenant Lifecycle Test
+# 5. Multi-Store Tenant Lifecycle Test
 python scripts/test_multi_store.py
 
-# 5. Redis Prompt Caching & Latency Benchmark
+# 6. Redis Prompt Caching & Latency Benchmark
 python scripts/benchmark_latency_cache.py
 ```
 

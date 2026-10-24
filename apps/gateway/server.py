@@ -19,6 +19,8 @@ from rbac import (
     ROLE_PERMISSIONS,
     ALL_ROLES,
     ROLE_ADMIN,
+    extract_tenant_from_tool,
+    is_tenant_authorized,
 )
 from policy_engine import policy_engine
 # Alias is_tool_allowed to the dynamic policy engine so all downstream calls use dynamic rules
@@ -32,6 +34,7 @@ from hosted_manager import hosted_manager, HostedDeployRequest
 from metrics import telemetry
 from ssrf_validator import validate_upstream_url
 from chat_memory import chat_memory
+from api_keys_store import api_key_store
 
 app = FastAPI(
     title="Unified Team MCP Gateway",
@@ -39,13 +42,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Enable CORS for Frontend UI (localhost:3000, Ingress store.local, etc.)
+# Enable CORS for trusted dashboard and ingress origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|store\.local|dashboard\.local)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
 )
 
 rate_limiter = RateLimiter(
@@ -53,24 +58,8 @@ rate_limiter = RateLimiter(
     burst=settings.rate_limit_burst,
 )
 
-# In-memory API keys storage (dual-indexed by raw token & SHA-256 hash for secure zero-trust verification)
-api_keys_db: Dict[str, Dict[str, Any]] = {}
-for key, data in settings.default_api_keys.items():
-    key_id = f"key_{uuid.uuid4().hex[:8]}"
-    key_hash = hashlib.sha256(key.encode()).hexdigest()
-    item = {
-        "id": key_id,
-        "name": data["name"],
-        "keyPrefix": f"{key[:8]}...",
-        "role": data["role"],
-        "scope": data["scope"],
-        "createdAt": time.strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "lastUsedAt": "never",
-        "expiresAt": "Never",
-        "isRevoked": False,
-    }
-    api_keys_db[key] = item
-    api_keys_db[key_hash] = item
+# In-memory API keys compatibility stub (backed by api_key_store)
+api_keys_db: Dict[str, Dict[str, Any]] = api_key_store._local_keys_by_id
 
 class Principal:
     def __init__(
@@ -83,6 +72,7 @@ class Principal:
         auth_type: str = "API Key",
         email: str = "",
         avatar: str = "",
+        allowed_stores: Optional[List[str]] = None,
     ):
         self.key = key
         self.name = name
@@ -92,6 +82,15 @@ class Principal:
         self.auth_type = auth_type
         self.email = email
         self.avatar = avatar
+        self.allowed_stores = allowed_stores if allowed_stores is not None else (["*"] if role == ROLE_ADMIN else ["default"])
+
+    def can_access_store(self, tenant_slug: Optional[str]) -> bool:
+        """Enforces tenant store ownership boundaries."""
+        if not tenant_slug:
+            return True
+        if self.role == ROLE_ADMIN or "*" in self.allowed_stores:
+            return True
+        return tenant_slug.lower() in [s.lower() for s in self.allowed_stores]
 
 async def get_current_principal(
     request: Request,
@@ -134,6 +133,11 @@ async def get_current_principal(
         scopes_list = payload.get("scopes", [])
         scopes_str = ",".join(scopes_list) if isinstance(scopes_list, list) else str(scopes_list)
 
+        # Multi-tenant store scoping in JWT
+        user_stores = payload.get("allowed_stores") or payload.get("stores") or (["*"] if user_role == ROLE_ADMIN else ["default"])
+        if isinstance(user_stores, str):
+            user_stores = [s.strip() for s in user_stores.split(",") if s.strip()]
+
         # Enforce rate limiting on JWT user (exempt admin)
         if user_role != ROLE_ADMIN:
             allowed, retry_after = await rate_limiter.check_rate_limit(user_id)
@@ -163,22 +167,22 @@ async def get_current_principal(
             auth_type="OAuth 2.0 (JWT)",
             email=user_email,
             avatar=user_avatar,
+            allowed_stores=user_stores,
         )
 
-    # 2. Backward Compatibility: Check legacy API key via cryptographic lookup
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    key_info = api_keys_db.get(token) or api_keys_db.get(token_hash)
+    # 2. API Key Verification via Persistent Distributed Store
+    key_info = await api_key_store.get_key(token)
     if not key_info or key_info.get("isRevoked"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or revoked API key.",
         )
 
-    # Update last used timestamp
-    key_info["lastUsedAt"] = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Update last used timestamp across replicas
+    await api_key_store.update_last_used(key_info["id"])
 
-    # Enforce Rate Limiting (exempt admin from polling throttling)
-    if key_info.get("role") != ROLE_ADMIN:
+    # Enforce Rate Limiting (exempt platform bootstrap admin key from polling throttling)
+    if token != settings.admin_api_key:
         allowed, retry_after = await rate_limiter.check_rate_limit(token)
         if not allowed:
             telemetry.record_rate_limit(token)
@@ -197,6 +201,8 @@ async def get_current_principal(
                 headers={"Retry-After": str(int(retry_after) + 1)},
             )
 
+    key_stores = key_info.get("allowedStores") or key_info.get("allowed_stores") or (["*"] if key_info.get("role") == ROLE_ADMIN else ["default"])
+
     return Principal(
         key=token,
         name=key_info["name"],
@@ -206,6 +212,7 @@ async def get_current_principal(
         auth_type="API Key",
         email=f"{key_info['role']}@urumi.enterprise",
         avatar="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80" if key_info["role"] != ROLE_ADMIN else "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+        allowed_stores=key_stores,
     )
 
 # -------------------------------------------------------------
@@ -373,6 +380,7 @@ async def unregister_server_endpoint(
 
 @app.on_event("startup")
 async def on_startup():
+    await api_key_store.seed_default_keys(settings.get_initial_keys())
     asyncio.create_task(provisioning_engine.reconcile_existing_stores())
     asyncio.create_task(hosted_manager.reconcile_existing())
 
@@ -558,15 +566,25 @@ async def list_tools(
     target_role = role or principal.role
     all_tools = upstream_manager.get_all_tools()
     
-    # Enrich tools with caller's policy check
+    # Enrich tools with caller's policy check and tenant store authorization
     enriched = []
     for t in all_tools:
-        allowed = is_tool_allowed(target_role, t["namespacedName"])
+        tool_name = t["namespacedName"]
+        tenant = extract_tenant_from_tool(tool_name)
+        tenant_allowed = principal.can_access_store(tenant)
+        role_allowed = is_tool_allowed(target_role, tool_name)
+        allowed = role_allowed and tenant_allowed
+        
+        effective_rule = (
+            f"Role '{target_role}': {'Permitted' if role_allowed else 'Blocked'}"
+            if tenant_allowed
+            else f"Tenant '{tenant or 'default'}': Store Access Denied"
+        )
         enriched.append({
             **t,
             "policy": "ALLOW" if allowed else "DENY",
             "isAllowed": allowed,
-            "effectiveRule": f"Role '{target_role}': {'Permitted' if allowed else 'Blocked'}",
+            "effectiveRule": effective_rule,
         })
     return enriched
 
@@ -591,6 +609,7 @@ class CreateApiKeyRequest(BaseModel):
     name: str
     role: str = Field(default="support_rep")
     scope: str = Field(default="read:write")
+    allowed_stores: Optional[List[str]] = Field(default=None)
 
 @app.get("/api/v1/api-keys")
 async def get_api_keys(principal: Principal = Depends(get_current_principal)):
@@ -599,14 +618,14 @@ async def get_api_keys(principal: Principal = Depends(get_current_principal)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can view workspace API keys.",
         )
-    # Mask full secrets to prevent token exfiltration, deduplicate by key ID
-    unique_items = {k["id"]: k for k in api_keys_db.values()}.values()
+    # Mask full secrets to prevent token exfiltration
+    keys = await api_key_store.list_keys()
     return [
         {
             **k,
             "key": f"{k.get('keyPrefix', 'key-****')[:8]}********",
         }
-        for k in unique_items
+        for k in keys
     ]
 
 @app.post("/api/v1/api-keys", status_code=status.HTTP_201_CREATED)
@@ -625,23 +644,16 @@ async def create_api_key(
             detail=f"Invalid role '{req.role}'. Choose from {ALL_ROLES}.",
         )
 
-    new_key = f"{req.role[:3]}-key-{uuid.uuid4().hex[:12]}"
-    new_id = f"key_{uuid.uuid4().hex[:8]}"
-    key_hash = hashlib.sha256(new_key.encode()).hexdigest()
-    item = {
-        "id": new_id,
-        "name": req.name,
-        "keyPrefix": f"{new_key[:8]}...",
-        "role": req.role,
-        "scope": req.scope,
-        "createdAt": time.strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "lastUsedAt": "never",
-        "expiresAt": "Never",
-        "isRevoked": False,
-    }
-    api_keys_db[new_key] = item
-    api_keys_db[key_hash] = item
-    return {**item, "key": new_key}
+    prefix = req.role[:3]
+    custom_token = f"{prefix}-key-{uuid.uuid4().hex[:12]}"
+    raw_key, item = await api_key_store.create_key(
+        name=req.name,
+        role=req.role,
+        scope=req.scope,
+        allowed_stores=req.allowed_stores,
+        custom_token=custom_token,
+    )
+    return {**item, "key": raw_key}
 
 @app.delete("/api/v1/api-keys/{key_id}")
 async def revoke_api_key(
@@ -653,14 +665,9 @@ async def revoke_api_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can revoke API keys.",
         )
-    target_hash = hashlib.sha256(key_id.encode()).hexdigest()
-    found = False
-    for khash, v in api_keys_db.items():
-        if v["id"] == key_id or khash == key_id or khash == target_hash:
-            v["isRevoked"] = True
-            found = True
-    if found:
-        return {"status": "success", "message": f"API Key '{key_id}' has been revoked."}
+    revoked = await api_key_store.revoke_key(key_id)
+    if revoked:
+        return {"status": "success", "message": f"API Key '{key_id}' has been revoked across all replicas."}
     raise HTTPException(status_code=404, detail="API Key not found.")
 
 # -------------------------------------------------------------
@@ -862,7 +869,8 @@ async def get_stats(principal: Principal = Depends(get_current_principal)):
     stats["active_servers"] = sum(1 for s in upstream_manager.servers.values() if s.status == "Connected")
     stats["total_servers"] = len(upstream_manager.servers)
     stats["total_tools"] = len(upstream_manager.get_all_tools())
-    stats["total_api_keys"] = len([k for k in api_keys_db.values() if not k["isRevoked"]])
+    keys = await api_key_store.list_keys()
+    stats["total_api_keys"] = len([k for k in keys if not k.get("isRevoked")])
     return stats
 
 # -------------------------------------------------------------
@@ -945,7 +953,30 @@ async def call_tool(
     client_ip = request.client.host if request.client else "127.0.0.1"
     client_agent = request.headers.get("User-Agent", "MCP-Client/1.0")
 
-    # 1. Enforce RBAC
+    # 1. Enforce Multi-Tenant Store Ownership Isolation
+    tenant = extract_tenant_from_tool(req.tool)
+    if tenant and not principal.can_access_store(tenant):
+        telemetry.record_rbac_violation(principal.role, f"tenant_violation:{tenant}")
+        duration_ms = (time.monotonic() - start_time) * 1000
+        audit_logger.log_event(
+            principal=principal.name,
+            user_role=principal.role,
+            tool_name=req.tool,
+            target_server="gateway",
+            status="403 Blocked",
+            duration_ms=duration_ms,
+            client_ip=client_ip,
+            client_agent=client_agent,
+            params=req.arguments,
+            policy_rule_detail=f"Multi-Tenant Violation: Principal '{principal.name}' does not have access rights to store tenant '{tenant}'",
+            upstream_status="Skipped",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Tenant Access Denied: Caller is not entitled to invoke tools on store tenant '{tenant}'.",
+        )
+
+    # 2. Enforce RBAC
     if not is_tool_allowed(principal.role, req.tool):
         telemetry.record_rbac_violation(principal.role, req.tool)
         duration_ms = (time.monotonic() - start_time) * 1000
@@ -967,7 +998,7 @@ async def call_tool(
             detail=f"Permission Denied: Role '{principal.role}' is not authorized to execute tool '{req.tool}'.",
         )
 
-    # 2. Enforce Tool Parameter Bounds Validation at Perimeter
+    # 3. Enforce Tool Parameter Bounds Validation at Perimeter
     val_err = validate_tool_arguments(req.tool, req.arguments)
     if val_err:
         duration_ms = (time.monotonic() - start_time) * 1000

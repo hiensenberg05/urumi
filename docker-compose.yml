@@ -24,10 +24,10 @@ services:
     networks:
       - urumi-net
     environment:
-      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-mariadb_root_password_123}
+      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?MARIADB_ROOT_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MARIADB_DATABASE:-wordpress}
       MYSQL_USER: ${MARIADB_USER:-wordpress}
-      MYSQL_PASSWORD: ${MARIADB_PASSWORD:-wp_secure_password_123}
+      MYSQL_PASSWORD: ${MARIADB_PASSWORD:?MARIADB_PASSWORD must be set in .env}
     volumes:
       - mariadb_data:/var/lib/mysql
     healthcheck:
@@ -73,7 +73,7 @@ services:
       WORDPRESS_DB_HOST: mariadb:3306
       WORDPRESS_DB_NAME: ${MARIADB_DATABASE:-wordpress}
       WORDPRESS_DB_USER: ${MARIADB_USER:-wordpress}
-      WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD:-wp_secure_password_123}
+      WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD:?MARIADB_PASSWORD must be set in .env}
       WORDPRESS_CONFIG_EXTRA: |
         define('WP_HOME', 'http://store.local');
         define('WP_SITEURL', 'http://store.local');
@@ -101,8 +101,8 @@ services:
       WC_URL: http://wordpress
       WC_HOST_HEADER: store.local
       WC_VERIFY_SSL: "false"
-      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY:-ck_98fbc18596f264871d8717904e5d61483acfb0a1}
-      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET:-cs_12cda47b1981cb02720b08051a8bc8f895f3b7d1}
+      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY:?WC_CONSUMER_KEY must be set in .env}
+      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET:?WC_CONSUMER_SECRET must be set in .env}
 
   inventory-mcp:
     image: hiensenbergg/inventory-mcp:v1.1.1
@@ -130,8 +130,8 @@ services:
       WC_URL: http://wordpress
       WC_HOST_HEADER: store.local
       WC_VERIFY_SSL: "false"
-      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY:-ck_98fbc18596f264871d8717904e5d61483acfb0a1}
-      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET:-cs_12cda47b1981cb02720b08051a8bc8f895f3b7d1}
+      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY:?WC_CONSUMER_KEY must be set in .env}
+      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET:?WC_CONSUMER_SECRET must be set in .env}
 
   hosted-currency:
     image: hiensenbergg/hosted-mcp:v1.0.0
@@ -188,8 +188,8 @@ services:
       UPSTREAM_WOOCOMMERCE_URL: http://woocommerce-mcp:8001/mcp
       UPSTREAM_INVENTORY_URL: http://inventory-mcp:8002/mcp
       UPSTREAM_ANALYTICS_URL: http://analytics-mcp:8003/mcp
-      ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-key-urumi-2026}
-      JWT_SECRET: ${JWT_SECRET:-urumi-jwt-production-secret-evaluator-2026}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set in .env}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
 
   # -----------------------------------------------------------------
   # 5. AI Copilot Service (ReAct Agent Engine)

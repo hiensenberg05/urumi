@@ -12,8 +12,11 @@ import time
 import os
 from typing import Dict, Any, Optional, List, Tuple
 
-# Secret key for JWT signature verification (configurable via env)
-JWT_SECRET = os.environ.get("GATEWAY_JWT_SECRET", "urumi-mcp-gateway-super-secret-jwt-signing-key-2026")
+import secrets
+
+# Secret key for JWT signature verification (configurable via env, securely randomized fallback)
+_runtime_fallback_secret = secrets.token_hex(32)
+JWT_SECRET = os.environ.get("GATEWAY_JWT_SECRET") or os.environ.get("JWT_SECRET") or _runtime_fallback_secret
 JWT_ALGORITHM = "HS256"
 JWT_ISSUER = "urumi-mcp-gateway"
 DEFAULT_TOKEN_EXPIRY_SECONDS = 3600  # 1 hour
