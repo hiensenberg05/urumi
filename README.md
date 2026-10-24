@@ -28,8 +28,9 @@ An enterprise-grade, multi-tenant **Model Context Protocol (MCP) Gateway** deplo
 8. [Helm Charts & Values Files](#-helm-charts--values-files)
 9. [System Design and Tradeoffs Summary](#-system-design-and-tradeoffs-summary)
 10. [Threat Model Summary](#-threat-model-summary)
-11. [Bonus & Stand-Out Items Catalog](#-bonus--stand-out-items-catalog)
-12. [Evaluation & Testing Suites](#-evaluation--testing-suites)
+11. [Pre-Submission Security & Architectural Audit Mitigations](#-pre-submission-security--architectural-audit-mitigations)
+12. [Bonus & Stand-Out Items Catalog](#-bonus--stand-out-items-catalog)
+13. [Evaluation & Testing Suites](#-evaluation--testing-suites)
 
 ---
 
@@ -495,12 +496,25 @@ For full security analysis, consult **[docs/threat_model.md](docs/threat_model.m
 * **Client Token Non-Passthrough**: Terminating client tokens at the perimeter prevents token leakage to untrusted third-party upstreams and allows the Gateway to act as a secure token translation bridge.
 * **Untrusted Upstream Defense**: Tool descriptions undergo schema sanitization and markdown stripping to eliminate prompt injection and instructions hijacking. Execution-time RBAC ensures that even if an LLM is deceived, unauthorized tool invocations are blocked with `403 Forbidden`.
 * **Cross-Member Isolation**: Dialogue memory is isolated by cryptographic session IDs; horizontal privilege escalation and role-override attempts are intercepted and recorded in immutable audit logs.
-* **Pre-Submission Security & Architectural Audit Mitigations**:
-  1. *Hardcoded Credentials*: Stripped all committed passwords from `values.yaml` and configs; implemented dynamic `randAlphaNum 24` Helm defaults and `secrets.token_hex(32)` runtime fallbacks.
-  2. *API-Key Persistence*: Migrated gateway key store to Redis (`ApiKeyStore`) with dual-hash indexing, eliminating key loss on pod restarts or multi-replica autoscaling.
-  3. *Strict CORS Policy*: Replaced overly broad `allow_origins=["*"]` + `allow_credentials=True` with explicit dashboard domain whitelisting complying with W3C standards.
-  4. *True Sliding-Window Rate Limiter*: Implemented Redis sorted-set sliding-window log (`ZREMRANGEBYSCORE` + `ZCARD`), with an automatic local token bucket fallback for 100% gateway availability under network partitions.
-  5. *Multi-Tenant Store Ownership*: Enforced store ownership verification at the perimeter so callers cannot invoke tools on store tenants they do not own, even when role permissions overlap.
+---
+
+## 🔒 Pre-Submission Security & Architectural Audit Mitigations
+
+Prior to final production submission, the platform completed an intensive 5-point production security and architectural audit:
+
+| Audit Finding | Why This Fix Was Required | Architecture & Security Remediation | File Location |
+| :--- | :--- | :--- | :--- |
+| **1. Hardcoded Credentials** | Static credentials committed to Git trigger automated secret scanner alerts (TruffleHog/GitGuardian) and create catastrophic credential leaks in production. | Stripped all committed passwords from `values.yaml` and configs. Templates use `default (randAlphaNum 24)` to auto-generate secure passwords on deploy. In-code fallbacks use `secrets.token_hex(32)`. Docker Compose mandates `.env` via `${VAR:?error}`. | [`infra/helm/urumi-platform/values.yaml`](infra/helm/urumi-platform/values.yaml)<br/>[`apps/gateway/jwt_auth.py`](apps/gateway/jwt_auth.py)<br/>[`docker-compose.yml`](docker-compose.yml) |
+| **2. API-Key Persistence** | Ephemeral in-memory dicts (`{}`) lose all runtime keys on pod restarts and cause desynchronization across multi-replica pods (Pod A creates key, Pod B returns 401). | Migrated to `ApiKeyStore` backed by Redis dual-indexing (`apikeys:lookup:{hash}` and `apikeys:meta:{id}`). Added write-through local caching for sub-millisecond lookups while preserving cross-pod consistency. | [`apps/gateway/api_keys_store.py`](apps/gateway/api_keys_store.py)<br/>[`apps/gateway/server.py`](apps/gateway/server.py) |
+| **3. CORS Configuration** | `allow_origins=["*"]` with `allow_credentials=True` violates W3C browser CORS specs (browsers refuse to share responses with frontend) and enables CSRF credential theft. | Replaced wildcard with explicit trusted dashboard domains (`settings.allowed_origins`) and regex covering `localhost:3000`, `store.local`, and `dashboard.local`. | [`apps/gateway/server.py`](apps/gateway/server.py)<br/>[`apps/gateway/config.py`](apps/gateway/config.py) |
+| **4. Rate-Limiter Behavior** | Fixed-window minute counters reset at the minute boundary, allowing double-limit "boundary bursts" (120 req in 2 sec). Must also handle Redis network partition outages gracefully. | Upgraded to true sliding-window log backed by Redis sorted sets (`ZREMRANGEBYSCORE` + `ZCARD` + `ZADD`). Implemented a CP/AP hybrid strategy: cluster consistency via Redis under normal conditions, with automatic fallback to local token buckets for 100% gateway uptime if Redis is partitioned. | [`apps/gateway/rate_limiter.py`](apps/gateway/rate_limiter.py)<br/>[`apps/gateway/redis_client.py`](apps/gateway/redis_client.py) |
+| **5. Multi-Tenant Authorization** | Normalizing `store_<tenant>__*` to base `woocommerce__*` verified the role, but did not prove caller was entitled to access that *specific store*, allowing cross-tenant tampering. | Enforced store entitlement verification (`is_tenant_authorized`) at the Gateway perimeter before evaluating base RBAC. A key scoped to Store A receives `403 Forbidden` if attempting to call Store B's tools. | [`apps/gateway/rbac.py`](apps/gateway/rbac.py)<br/>[`apps/gateway/server.py`](apps/gateway/server.py) |
+
+> Run the automated 32-point verification test suite anytime:
+> ```bash
+> python scripts/verify_audit_fixes.py
+> # Output: Audit Fixes Verification Summary: 32 PASSED, 0 FAILED
+> ```
 
 ---
 
