@@ -125,5 +125,15 @@ spec:
                 name: gateway
                 port:
                   number: {{ .Values.gateway.port }}
+    - host: localhost
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: {{ .Values.gateway.port }}
 {{- end }}
 {{- end }}

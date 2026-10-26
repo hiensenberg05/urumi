@@ -289,9 +289,12 @@ Edit your Claude Desktop configuration file:
 {
   "mcpServers": {
     "urumi-gateway": {
-      "url": "http://localhost:8000/mcp",
-      "headers": {
-        "X-API-Key": "admin-key-urumi-2026"
+      "command": "python",
+      "args": ["scripts/antigravity_mcp_bridge.py"],
+      "env": {
+        "GATEWAY_API_KEY": "adm-key-21f2b31e34bc",
+        "GATEWAY_URL": "http://127.0.0.1:8000",
+        "GATEWAY_HOST_HEADER": "gateway.local"
       }
     }
   }

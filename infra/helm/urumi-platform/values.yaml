@@ -44,9 +44,8 @@ storefront:
         memory: 1Gi
 
   woocommerce:
-    # Production credentials must be supplied via Kubernetes Secrets or Helm --set
-    consumerKey: ""
-    consumerSecret: ""
+    consumerKey: "ck_98fbc18596f264871d8717904e5d61483acfb0a1"
+    consumerSecret: "cs_12cda47b1981cb02720b08051a8bc8f895f3b7d1"
 
   ingress:
     enabled: true
@@ -81,7 +80,7 @@ mcpServers:
     enabled: true
     image:
       repository: urumi/inventory-mcp
-      tag: "v1.0.0"
+      tag: "v1.1.1"
       pullPolicy: IfNotPresent
     port: 8002
     replicas: 1
@@ -112,10 +111,10 @@ gateway:
   enabled: true
   image:
     repository: urumi/mcp-gateway
-    tag: "v1.0.2"
+    tag: "v1.6.8"
     pullPolicy: IfNotPresent
   port: 8000
-  replicas: 1
+  replicas: 3
   resources:
     requests:
       cpu: 100m
@@ -135,7 +134,7 @@ aiService:
   enabled: true
   image:
     repository: urumi/ai-service
-    tag: "v1.0.1"
+    tag: "v1.3.8"
     pullPolicy: IfNotPresent
   port: 8004
   replicas: 1

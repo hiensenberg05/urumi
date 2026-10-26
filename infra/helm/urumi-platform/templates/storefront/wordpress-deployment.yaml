@@ -37,8 +37,9 @@ spec:
                   key: db-password
             - name: WORDPRESS_CONFIG_EXTRA
               value: |
-                define('WP_HOME', '{{ .Values.storefront.wordpress.siteUrl }}');
-                define('WP_SITEURL', '{{ .Values.storefront.wordpress.siteUrl }}');
+                $http_host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '{{ .Values.storefront.wordpress.siteUrl }}';
+                define('WP_HOME', 'http://' . $http_host);
+                define('WP_SITEURL', 'http://' . $http_host);
                 if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
                     $_SERVER['HTTPS'] = 'on';
                 }

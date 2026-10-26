@@ -76,6 +76,12 @@ class GatewaySettings(BaseSettings):
                 "scope": "read:tools",
                 "allowed_stores": ["default"],
             },
+            "adm-key-21f2b31e34bc": {
+                "name": "Claude Desktop Admin Key",
+                "role": "admin",
+                "scope": "read:write",
+                "allowed_stores": ["*"],
+            },
         }
 
 settings = GatewaySettings()
